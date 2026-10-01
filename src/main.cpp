@@ -70,7 +70,9 @@ namespace JM::RoadEncounters
             std::vector<Candidate> candidates;
             candidates.reserve(32);
 
-            processLists->ForEachHighActor([&](RE::Actor* a_actor) {
+            processLists->ForEachHighActor([&](RE::Actor& a_actorRef) {
+                auto* a_actor = std::addressof(a_actorRef);
+
                 if (!a_actor ||
                     a_actor == player ||
                     a_actor == a_center ||
