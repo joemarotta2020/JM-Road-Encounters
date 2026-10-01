@@ -1,0 +1,47 @@
+cmake_minimum_required(VERSION 3.21)
+
+project(
+    JM_RoadEncounters
+    VERSION 0.1.0
+    DESCRIPTION "Native nearby-actor detector for JM Road Encounters on Skyrim SE 1.5.97"
+    LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+
+include(FetchContent)
+
+# JM Road Encounters deliberately targets Skyrim SE 1.5.97 only.
+set(ENABLE_SKYRIM_SE ON CACHE BOOL "" FORCE)
+set(ENABLE_SKYRIM_AE OFF CACHE BOOL "" FORCE)
+set(ENABLE_SKYRIM_VR OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    CommonLibSSE
+    GIT_REPOSITORY https://github.com/CharmedBaryon/CommonLibSSE-NG.git
+    GIT_TAG v3.7.0
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(CommonLibSSE)
+
+add_library(JM_RoadEncounters SHARED
+    src/main.cpp
+)
+
+target_precompile_headers(JM_RoadEncounters PRIVATE src/PCH.h)
+target_include_directories(JM_RoadEncounters PRIVATE src)
+target_compile_definitions(JM_RoadEncounters PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+
+target_link_libraries(JM_RoadEncounters
+    PRIVATE
+        CommonLibSSE::CommonLibSSE
+)
+
+set_target_properties(JM_RoadEncounters PROPERTIES
+    OUTPUT_NAME "JM_RoadEncounters"
+)
+
+install(TARGETS JM_RoadEncounters DESTINATION SKSE/Plugins)
