@@ -76,7 +76,6 @@ namespace JM::RoadEncounters
                     a_actor == a_center ||
                     a_actor->IsDead() ||
                     a_actor->IsDisabled() ||
-                    a_actor->IsMarkedForDeletion() ||
                     !a_actor->Is3DLoaded() ||
                     !IsSameLoadedSpace(a_center, a_actor)) {
                     return RE::BSContainer::ForEachResult::kContinue;
@@ -136,6 +135,58 @@ namespace JM::RoadEncounters
         }
     }
 
+    void WakePapyrusScanner()
+    {
+        const auto* task = SKSE::GetTaskInterface();
+        if (!task) {
+            logger::error("Task interface unavailable; cannot wake JM_RE_Core");
+            return;
+        }
+
+        task->AddTask([]() {
+            auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+            if (!vm) {
+                logger::error("Papyrus VM unavailable during scanner wake");
+                return;
+            }
+
+            auto* quest = RE::TESForm::LookupByEditorID<RE::TESQuest>("JM_RE_CoreQuest");
+            if (!quest) {
+                logger::error("JM_RE_CoreQuest not found during scanner wake");
+                return;
+            }
+
+            auto* handlePolicy = vm->GetObjectHandlePolicy();
+            if (!handlePolicy) {
+                logger::error("Papyrus handle policy unavailable during scanner wake");
+                return;
+            }
+
+            const auto handle = handlePolicy->GetHandleForObject(
+                static_cast<RE::VMTypeID>(quest->GetFormType()), quest);
+
+            RE::BSTSmartPointer<RE::BSScript::Object> scriptObject;
+            if (!vm->FindBoundObject(handle, "JM_RE_Core", scriptObject) || !scriptObject) {
+                logger::error("Bound JM_RE_Core script not found during scanner wake");
+                return;
+            }
+
+            auto* args = RE::MakeFunctionArguments();
+            RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+
+            if (!vm->DispatchMethodCall(
+                    scriptObject,
+                    RE::BSFixedString("NativeWakeScanner"),
+                    args,
+                    callback)) {
+                logger::error("Failed to dispatch JM_RE_Core.NativeWakeScanner");
+                return;
+            }
+
+            logger::info("Dispatched JM_RE_Core.NativeWakeScanner");
+        });
+    }
+
     void InitializeLogging()
     {
         if (const auto logDir = SKSE::log::log_directory()) {
@@ -174,6 +225,26 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 
     if (!papyrus->Register(JM::RoadEncounters::Papyrus::Register)) {
         logger::critical("Failed to register JM_RE_Native Papyrus functions");
+        return false;
+    }
+
+    const auto* messaging = SKSE::GetMessagingInterface();
+    if (!messaging) {
+        logger::critical("SKSE messaging interface unavailable");
+        return false;
+    }
+
+    if (!messaging->RegisterListener([](SKSE::MessagingInterface::Message* a_message) {
+            if (!a_message) {
+                return;
+            }
+
+            if (a_message->type == SKSE::MessagingInterface::kPostLoadGame ||
+                a_message->type == SKSE::MessagingInterface::kNewGame) {
+                JM::RoadEncounters::WakePapyrusScanner();
+            }
+        })) {
+        logger::critical("Failed to register SKSE message listener");
         return false;
     }
 
