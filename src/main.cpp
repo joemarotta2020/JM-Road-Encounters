@@ -176,7 +176,7 @@ namespace JM::RoadEncounters
             auto* args = RE::MakeFunctionArguments();
             RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
 
-            if (!vm->DispatchMethodCall(
+            if (!vm->DispatchMethodCall1(
                     scriptObject,
                     RE::BSFixedString("NativeWakeScanner"),
                     args,
