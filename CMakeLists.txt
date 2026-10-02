@@ -27,21 +27,16 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(CommonLibSSE)
 
-add_library(JM_RoadEncounters SHARED
-    src/main.cpp
+add_commonlibsse_plugin(JM_RoadEncounters
+    NAME "JM_RoadEncounters"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBLE_RUNTIMES "1.5.97"
+    SOURCES
+        src/main.cpp
 )
 
 target_precompile_headers(JM_RoadEncounters PRIVATE src/PCH.h)
 target_include_directories(JM_RoadEncounters PRIVATE src)
 target_compile_definitions(JM_RoadEncounters PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-
-target_link_libraries(JM_RoadEncounters
-    PRIVATE
-        CommonLibSSE::CommonLibSSE
-)
-
-set_target_properties(JM_RoadEncounters PROPERTIES
-    OUTPUT_NAME "JM_RoadEncounters"
-)
 
 install(TARGETS JM_RoadEncounters DESTINATION SKSE/Plugins)
