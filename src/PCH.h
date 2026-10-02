@@ -12,9 +12,11 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <spdlog/sinks/basic_file_sink.h>
 
+using namespace std::literals;
 namespace logger = SKSE::log;
