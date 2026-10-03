@@ -271,7 +271,10 @@ namespace JM::RoadEncounters
             RE::StaticFunctionTag*,
             RE::TESObjectREFR* a_center,
             float a_radius,
-            std::int32_t a_maxResults)
+            std::int32_t a_maxResults,
+            RE::Actor* a_exclude1,
+            RE::Actor* a_exclude2,
+            RE::Actor* a_exclude3)
         {
             const auto nearby =
                 GetNearbyActors(nullptr, a_center, a_radius, a_maxResults);
@@ -281,6 +284,11 @@ namespace JM::RoadEncounters
             for (auto* actor : nearby) {
                 if (!actor || actor == player) {
                     continue;  // PlayerRef is the typed-array no-result sentinel.
+                }
+                if (actor == a_exclude1 ||
+                    actor == a_exclude2 ||
+                    actor == a_exclude3) {
+                    continue;
                 }
 
                 ++tested;
