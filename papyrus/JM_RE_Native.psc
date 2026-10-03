@@ -13,3 +13,7 @@ Int Function ClassifySSSWhoringActor(Actor akActor) Global Native
 
 ; True while the actor is running the SSS force-greet package/template associated with the supplied quest alias index.
 Bool Function IsSSSWhoringPackageActive(Actor akActor, Int aiAliasIndex) Global Native
+
+; Returns the nearest currently eligible SSS_Whoring actor, using the same
+; native high-process scan plus the loaded SSS_WhoringIdle INFO conditions.
+Actor Function FindSSSWhoringActor(ObjectReference akCenter, Float afRadius = 2200.0, Int aiMaxResults = 64) Global Native
