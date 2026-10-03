@@ -4,6 +4,9 @@ The DLL only finds nearby loaded actors. Encounter classification and gameplay r
 
 Bool Function IsAvailable() Global Native
 
+; Append a high-value Papyrus diagnostic line to JM_RoadEncounters.log.
+Function LogDiagnostic(String asMessage) Global Native
+
 Actor[] Function GetNearbyActors(ObjectReference akCenter, Float afRadius = 3500.0, Int aiMaxResults = 32) Global Native
 
 ; Returns the authoritative SSS_Whoring quest alias index for akActor by
