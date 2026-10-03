@@ -7,6 +7,27 @@ namespace JM::RoadEncounters
         constexpr std::int32_t kMaximumReturnedActors = 64;
         constexpr float kMaximumRadius = 10000.0f;
 
+        // SSS_Whoring uses four idle INFOs as its authoritative eligibility
+        // rules.  The native scanner evaluates those *actual loaded INFO
+        // conditions* against a candidate actor, so JM does not duplicate
+        // fragile faction / sex / amulet / distance / player-state logic in
+        // Papyrus.  Alias indices are from the original SSS_Whoring quest.
+        struct SSSApproachRule
+        {
+            std::uint32_t localInfoFormID;
+            std::int32_t aliasIndex;
+            const char* label;
+        };
+
+        constexpr std::array<SSSApproachRule, 4> kSSSApproachRules{{
+            { 0x00D471B9, 0, "client" },   // SSS_SoliciteforSex -> akClient
+            { 0x00E904EB, 3, "soldier" },  // SSS_SoldierWhore -> akSoldier
+            { 0x00E7C0DF, 2, "amulet" },   // SSS_AmuletSex -> akJill
+            { 0x00F13F73, 5, "bandit" }    // SSS_BanditApproach -> akBandit
+        }};
+
+        std::shared_ptr<spdlog::logger> g_sssLogger;
+
         struct Candidate
         {
             float distanceSquared;
@@ -32,6 +53,70 @@ namespace JM::RoadEncounters
 
             return a_center->GetParentCell() == a_actor->GetParentCell();
         }
+
+        std::vector<RE::Actor*> MakeNoResultArray(RE::Actor* a_player)
+        {
+            // CommonLib/Papyrus represents an empty native std::vector as None
+            // on this runtime.  Assigning that to Actor[] produces the noisy
+            // "Cannot cast from None to Actor[]" / temp-variable errors seen
+            // in JMEE.  A single PlayerRef sentinel forces creation of a real,
+            // typed Actor[]; every consumer already excludes the player.
+            std::vector<RE::Actor*> result;
+            if (a_player) {
+                result.push_back(a_player);
+            }
+            return result;
+        }
+
+        std::int32_t ClassifySSSWhoringActorImpl(RE::Actor* a_actor)
+        {
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            if (!player || !a_actor || a_actor == player ||
+                a_actor->IsDead() || a_actor->IsDisabled() ||
+                !a_actor->Is3DLoaded()) {
+                return -1;
+            }
+
+            auto* dataHandler = RE::TESDataHandler::GetSingleton();
+            if (!dataHandler) {
+                if (g_sssLogger) {
+                    g_sssLogger->error("classification failed: TESDataHandler unavailable");
+                }
+                return -1;
+            }
+
+            // Evaluate in the original INFO order.  The winning INFO object
+            // contains the current override's CTDA chain, including JM's
+            // ReadyGlobal condition, so this automatically tracks xEdit
+            // changes without re-implementing them in C++.
+            for (const auto& rule : kSSSApproachRules) {
+                auto* info = dataHandler->LookupForm<RE::TESTopicInfo>(
+                    rule.localInfoFormID, "SkyrimShroudedSecret.esp");
+                if (!info) {
+                    if (g_sssLogger) {
+                        g_sssLogger->error(
+                            "missing SSS_WhoringIdle INFO 0x{:06X} ({})",
+                            rule.localInfoFormID, rule.label);
+                    }
+                    continue;
+                }
+
+                if (info->objConditions.IsTrue(a_actor, player)) {
+                    if (g_sssLogger) {
+                        g_sssLogger->info(
+                            "eligible actor={} form=0x{:08X} rule={} alias={} distance={:.0f}",
+                            a_actor->GetName(),
+                            a_actor->GetFormID(),
+                            rule.label,
+                            rule.aliasIndex,
+                            a_actor->GetDistance(player));
+                    }
+                    return rule.aliasIndex;
+                }
+            }
+
+            return -1;
+        }
     }
 
     namespace Papyrus
@@ -49,15 +134,15 @@ namespace JM::RoadEncounters
             float a_radius,
             std::int32_t a_maxResults)
         {
-            std::vector<RE::Actor*> result;
+            auto* player = RE::PlayerCharacter::GetSingleton();
 
             if (!a_center || a_radius <= 0.0f || a_maxResults <= 0) {
-                return result;
+                return MakeNoResultArray(player);
             }
 
             auto* processLists = RE::ProcessLists::GetSingleton();
             if (!processLists) {
-                return result;
+                return MakeNoResultArray(player);
             }
 
             const float radius = (std::min)(a_radius, kMaximumRadius);
@@ -65,7 +150,6 @@ namespace JM::RoadEncounters
             const auto maxResults = static_cast<std::size_t>(
                 (std::clamp)(a_maxResults, 1, kMaximumReturnedActors));
             const auto centerPosition = a_center->GetPosition();
-            auto* player = RE::PlayerCharacter::GetSingleton();
 
             std::vector<Candidate> candidates;
             candidates.reserve(32);
@@ -94,7 +178,7 @@ namespace JM::RoadEncounters
             });
 
             if (candidates.empty()) {
-                return result;
+                return MakeNoResultArray(player);
             }
 
             if (candidates.size() > maxResults) {
@@ -120,7 +204,17 @@ namespace JM::RoadEncounters
                 result.push_back(candidate.actor);
             }
 
+            if (result.empty()) {
+                return MakeNoResultArray(player);
+            }
             return result;
+        }
+
+        std::int32_t ClassifySSSWhoringActor(
+            RE::StaticFunctionTag*,
+            RE::Actor* a_actor)
+        {
+            return ClassifySSSWhoringActorImpl(a_actor);
         }
 
         bool Register(RE::BSScript::IVirtualMachine* a_vm)
@@ -131,8 +225,17 @@ namespace JM::RoadEncounters
 
             a_vm->RegisterFunction("IsAvailable", kScriptName, IsAvailable);
             a_vm->RegisterFunction("GetNearbyActors", kScriptName, GetNearbyActors);
+            a_vm->RegisterFunction(
+                "ClassifySSSWhoringActor",
+                kScriptName,
+                ClassifySSSWhoringActor);
 
             logger::info("Registered Papyrus class {}", kScriptName);
+            if (g_sssLogger) {
+                g_sssLogger->info(
+                    "native SSS acquisition API registered on {}",
+                    kScriptName);
+            }
             return true;
         }
     }
@@ -186,6 +289,53 @@ namespace JM::RoadEncounters
             }
 
             logger::info("Dispatched JM_RE_Core.NativeWakeScanner");
+
+            // Skyrim Shrouded Secret is optional.  If present, wake JM's
+            // acquisition controller on every load/new game so it reconciles
+            // its save-persistent cooldown and immediately re-arms scanning.
+            auto* sssQuest = RE::TESForm::LookupByEditorID<RE::TESQuest>("SSS_Whoring");
+            if (!sssQuest) {
+                if (g_sssLogger) {
+                    g_sssLogger->info("SSS_Whoring not installed; native SSS wake skipped");
+                }
+                return;
+            }
+
+            const auto sssHandle = handlePolicy->GetHandleForObject(
+                static_cast<RE::VMTypeID>(sssQuest->GetFormType()), sssQuest);
+
+            RE::BSTSmartPointer<RE::BSScript::Object> sssScriptObject;
+            if (!vm->FindBoundObject(
+                    sssHandle,
+                    "JM_SSS_WhoringController",
+                    sssScriptObject) ||
+                !sssScriptObject) {
+                if (g_sssLogger) {
+                    g_sssLogger->warn(
+                        "SSS_Whoring is present but JM_SSS_WhoringController "
+                        "is not bound; acquisition wake skipped");
+                }
+                return;
+            }
+
+            auto* sssArgs = RE::MakeFunctionArguments();
+            RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> sssCallback;
+            if (!vm->DispatchMethodCall1(
+                    sssScriptObject,
+                    RE::BSFixedString("NativeWakeScanner"),
+                    sssArgs,
+                    sssCallback)) {
+                if (g_sssLogger) {
+                    g_sssLogger->error(
+                        "failed to dispatch JM_SSS_WhoringController.NativeWakeScanner");
+                }
+                return;
+            }
+
+            if (g_sssLogger) {
+                g_sssLogger->info(
+                    "dispatched JM_SSS_WhoringController.NativeWakeScanner");
+            }
         });
     }
 
@@ -200,6 +350,16 @@ namespace JM::RoadEncounters
             spdlog::set_default_logger(std::move(log));
             spdlog::set_level(spdlog::level::info);
             spdlog::flush_on(spdlog::level::info);
+
+            auto sssPath = *logDir / "JM_SSS_Native.log";
+            auto sssSink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
+                sssPath.string(), true);
+            g_sssLogger = std::make_shared<spdlog::logger>(
+                "jm_sss_native", std::move(sssSink));
+            g_sssLogger->set_level(spdlog::level::info);
+            g_sssLogger->flush_on(spdlog::level::info);
+            spdlog::register_logger(g_sssLogger);
+            g_sssLogger->info("JM SSS native acquisition diagnostics initialized");
         }
     }
 }
