@@ -26,6 +26,21 @@ namespace JM::RoadEncounters
             { 0x00F13F73, 5, "bandit" }    // SSS_BanditApproach -> akBandit
         }};
 
+        struct SSSAliasPackage
+        {
+            std::int32_t aliasIndex;
+            std::uint32_t localPackageFormID;
+        };
+
+        constexpr std::array<SSSAliasPackage, 4> kSSSAliasPackages{{
+            { 0, 0x00D420AE },  // SSS_SolicitePlayerPackage
+            { 2, 0x00EA9A0B },  // SSS_SolicitePlayerPackageGigolo
+            { 3, 0x00E904EA },  // SSS_SoldierSolicitePlayerPackage
+            { 5, 0x00F1E176 }   // SSS_BanditrSolicitePlayerPackage
+        }};
+
+        constexpr std::uint32_t kSSSForceGreetTemplate = 0x00D471B7;
+
         std::shared_ptr<spdlog::logger> g_sssLogger;
 
         struct Candidate
@@ -116,6 +131,40 @@ namespace JM::RoadEncounters
             }
 
             return -1;
+        }
+
+        bool IsSSSWhoringPackageActiveImpl(
+            RE::Actor* a_actor,
+            std::int32_t a_aliasIndex)
+        {
+            if (!a_actor) {
+                return false;
+            }
+
+            auto* current = a_actor->GetCurrentPackage();
+            auto* dataHandler = RE::TESDataHandler::GetSingleton();
+            if (!current || !dataHandler) {
+                return false;
+            }
+
+            auto* forceGreetTemplate = dataHandler->LookupForm<RE::TESPackage>(
+                kSSSForceGreetTemplate, "SkyrimShroudedSecret.esp");
+            if (current == forceGreetTemplate) {
+                return true;
+            }
+
+            for (const auto& entry : kSSSAliasPackages) {
+                if (entry.aliasIndex != a_aliasIndex) {
+                    continue;
+                }
+
+                auto* expected = dataHandler->LookupForm<RE::TESPackage>(
+                    entry.localPackageFormID,
+                    "SkyrimShroudedSecret.esp");
+                return current == expected;
+            }
+
+            return false;
         }
     }
 
@@ -217,6 +266,14 @@ namespace JM::RoadEncounters
             return ClassifySSSWhoringActorImpl(a_actor);
         }
 
+        bool IsSSSWhoringPackageActive(
+            RE::StaticFunctionTag*,
+            RE::Actor* a_actor,
+            std::int32_t a_aliasIndex)
+        {
+            return IsSSSWhoringPackageActiveImpl(a_actor, a_aliasIndex);
+        }
+
         bool Register(RE::BSScript::IVirtualMachine* a_vm)
         {
             if (!a_vm) {
@@ -229,6 +286,10 @@ namespace JM::RoadEncounters
                 "ClassifySSSWhoringActor",
                 kScriptName,
                 ClassifySSSWhoringActor);
+            a_vm->RegisterFunction(
+                "IsSSSWhoringPackageActive",
+                kScriptName,
+                IsSSSWhoringPackageActive);
 
             logger::info("Registered Papyrus class {}", kScriptName);
             if (g_sssLogger) {
