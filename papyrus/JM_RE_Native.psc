@@ -10,3 +10,6 @@ Actor[] Function GetNearbyActors(ObjectReference akCenter, Float afRadius = 3500
 ; evaluating the four loaded SSS_WhoringIdle INFO condition chains directly.
 ; Returns -1 when the actor is not currently eligible.
 Int Function ClassifySSSWhoringActor(Actor akActor) Global Native
+
+; True while the actor is running the SSS force-greet package/template associated with the supplied quest alias index.
+Bool Function IsSSSWhoringPackageActive(Actor akActor, Int aiAliasIndex) Global Native
