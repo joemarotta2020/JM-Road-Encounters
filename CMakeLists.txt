@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
     JM_RoadEncounters
-    VERSION 0.1.0
-    DESCRIPTION "Native nearby-actor detector for JM Road Encounters on Skyrim SE 1.5.97"
+    VERSION 0.2.0
+    DESCRIPTION "Native actor acquisition service for JM Road Encounters, JM Elite Encounters, and JM SSS on Skyrim SE 1.5.97"
     LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
