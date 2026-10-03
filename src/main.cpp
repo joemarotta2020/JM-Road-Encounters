@@ -119,12 +119,11 @@ namespace JM::RoadEncounters
                 if (info->objConditions.IsTrue(a_actor, player)) {
                     if (g_sssLogger) {
                         g_sssLogger->info(
-                            "eligible actor={} form=0x{:08X} rule={} alias={} distance={:.0f}",
+                            "eligible actor={} form=0x{:08X} rule={} alias={}",
                             a_actor->GetName(),
                             a_actor->GetFormID(),
                             rule.label,
-                            rule.aliasIndex,
-                            a_actor->GetDistance(player));
+                            rule.aliasIndex);
                     }
                     return rule.aliasIndex;
                 }
@@ -229,6 +228,8 @@ namespace JM::RoadEncounters
             if (candidates.empty()) {
                 return MakeNoResultArray(player);
             }
+
+            std::vector<RE::Actor*> result;
 
             if (candidates.size() > maxResults) {
                 std::partial_sort(
