@@ -176,6 +176,11 @@ namespace JM::RoadEncounters
             return true;
         }
 
+        void LogDiagnostic(RE::StaticFunctionTag*, RE::BSFixedString a_message)
+        {
+            logger::info("{}", a_message.c_str());
+        }
+
         std::vector<RE::Actor*> GetNearbyActors(
             RE::StaticFunctionTag*,
             RE::TESObjectREFR* a_center,
@@ -370,6 +375,7 @@ namespace JM::RoadEncounters
             }
 
             a_vm->RegisterFunction("IsAvailable", kScriptName, IsAvailable);
+            a_vm->RegisterFunction("LogDiagnostic", kScriptName, LogDiagnostic);
             a_vm->RegisterFunction("GetNearbyActors", kScriptName, GetNearbyActors);
             a_vm->RegisterFunction(
                 "ClassifySSSWhoringActor",
