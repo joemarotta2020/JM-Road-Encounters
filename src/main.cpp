@@ -69,18 +69,90 @@ namespace JM::RoadEncounters
             return a_center->GetParentCell() == a_actor->GetParentCell();
         }
 
-        std::vector<RE::Actor*> MakeNoResultArray(RE::Actor* a_player)
+        std::vector<RE::Actor*> MakeTypedActorArray(
+            RE::TESObjectREFR* a_center,
+            RE::Actor* a_player)
         {
             // CommonLib/Papyrus represents an empty native std::vector as None
-            // on this runtime.  Assigning that to Actor[] produces the noisy
-            // "Cannot cast from None to Actor[]" / temp-variable errors seen
-            // in JMEE.  A single PlayerRef sentinel forces creation of a real,
-            // typed Actor[]; every consumer already excludes the player.
+            // on this runtime.  Keep a real Actor sentinel in every returned
+            // array, including zero-result scans.  All consumers already
+            // exclude PlayerRef, so the sentinel is behaviorally inert.
             std::vector<RE::Actor*> result;
             if (a_player) {
                 result.push_back(a_player);
+            } else if (a_center) {
+                if (auto* centerActor = a_center->As<RE::Actor>()) {
+                    result.push_back(centerActor);
+                }
             }
             return result;
+        }
+
+        bool EvaluateConditionList(
+            const RE::TESCondition& a_conditions,
+            RE::ConditionCheckParams& a_params)
+        {
+            // Mirror Skyrim's flat AND / OR-block semantics while retaining
+            // the full ConditionCheckParams context (especially quest aliases).
+            auto* condition = a_conditions.head;
+            bool isORtrue = false;
+            bool wasOR = false;
+
+            while (condition) {
+                const bool isOR = condition->data.flags.isOR;
+
+                if (!wasOR && isOR) {
+                    isORtrue = condition->IsTrue(a_params);
+                } else if (wasOR && !isOR) {
+                    // The first non-OR condition after an OR-marked run is the
+                    // final member of that OR block.
+                    if (!isORtrue) {
+                        isORtrue = condition->IsTrue(a_params);
+                    }
+                    if (!isORtrue) {
+                        return false;
+                    }
+                    isORtrue = false;
+                } else if (wasOR && isOR) {
+                    if (!isORtrue) {
+                        isORtrue = condition->IsTrue(a_params);
+                    }
+                } else {
+                    if (!condition->IsTrue(a_params)) {
+                        return false;
+                    }
+                }
+
+                wasOR = isOR;
+                condition = condition->next;
+            }
+
+            return !wasOR || isORtrue;
+        }
+
+        bool EvaluateSSSTopicInfo(
+            RE::TESTopicInfo* a_info,
+            RE::Actor* a_speaker,
+            RE::TESObjectREFR* a_target)
+        {
+            if (!a_info || !a_speaker || !a_target) {
+                return false;
+            }
+
+            RE::ConditionCheckParams params(a_speaker, a_target);
+            auto* quest =
+                a_info->parentTopic ? a_info->parentTopic->ownerQuest : nullptr;
+            params.quest = quest;
+
+            // Dialogue evaluation supplies the owning quest in the condition
+            // context.  Calling TESCondition::IsTrue(speaker, target) alone
+            // drops that context, causing alias/quest-dependent SSS INFO
+            // conditions to evaluate false even for valid actors.
+            if (quest && !EvaluateConditionList(quest->objConditions, params)) {
+                return false;
+            }
+
+            return EvaluateConditionList(a_info->objConditions, params);
         }
 
         std::int32_t ClassifySSSWhoringActorImpl(RE::Actor* a_actor)
@@ -116,7 +188,7 @@ namespace JM::RoadEncounters
                     continue;
                 }
 
-                if (info->objConditions.IsTrue(a_actor, player)) {
+                if (EvaluateSSSTopicInfo(info, a_actor, player)) {
                     if (g_sssLogger) {
                         g_sssLogger->info(
                             "eligible actor={} form=0x{:08X} rule={} alias={}",
@@ -190,12 +262,12 @@ namespace JM::RoadEncounters
             auto* player = RE::PlayerCharacter::GetSingleton();
 
             if (!a_center || a_radius <= 0.0f || a_maxResults <= 0) {
-                return MakeNoResultArray(player);
+                return MakeTypedActorArray(a_center, player);
             }
 
             auto* processLists = RE::ProcessLists::GetSingleton();
             if (!processLists) {
-                return MakeNoResultArray(player);
+                return MakeTypedActorArray(a_center, player);
             }
 
             const float radius = (std::min)(a_radius, kMaximumRadius);
@@ -231,10 +303,11 @@ namespace JM::RoadEncounters
             });
 
             if (candidates.empty()) {
-                return MakeNoResultArray(player);
+                return MakeTypedActorArray(a_center, player);
             }
 
-            std::vector<RE::Actor*> result;
+            std::vector<RE::Actor*> result =
+                MakeTypedActorArray(a_center, player);
 
             if (candidates.size() > maxResults) {
                 std::partial_sort(
@@ -254,14 +327,11 @@ namespace JM::RoadEncounters
                     });
             }
 
-            result.reserve(candidates.size());
+            result.reserve(result.size() + candidates.size());
             for (const auto& candidate : candidates) {
                 result.push_back(candidate.actor);
             }
 
-            if (result.empty()) {
-                return MakeNoResultArray(player);
-            }
             return result;
         }
 
