@@ -318,6 +318,42 @@ namespace JM::RoadEncounters
             return IsSSSWhoringPackageActiveImpl(a_actor, a_aliasIndex);
         }
 
+        bool IsSSSWhoringDialogueActive(
+            RE::StaticFunctionTag*,
+            RE::Actor* a_actor)
+        {
+            if (!a_actor) {
+                return false;
+            }
+
+            auto* manager = RE::MenuTopicManager::GetSingleton();
+            auto* quest = RE::TESForm::LookupByEditorID<RE::TESQuest>("SSS_Whoring");
+            if (!manager || !quest) {
+                return false;
+            }
+
+            const auto actorHandle = a_actor->GetHandle().native_handle();
+            const auto speakerHandle = manager->speaker.native_handle();
+            auto* info = manager->currentTopicInfo;
+
+            const bool active =
+                actorHandle != 0 &&
+                actorHandle == speakerHandle &&
+                info != nullptr &&
+                info->parentTopic != nullptr &&
+                info->parentTopic->ownerQuest == quest;
+
+            if (active && g_sssLogger) {
+                g_sssLogger->info(
+                    "verified live SSS dialogue speaker={} form=0x{:08X} "
+                    "topicInfo=0x{:08X}",
+                    a_actor->GetName(),
+                    a_actor->GetFormID(),
+                    info->GetFormID());
+            }
+            return active;
+        }
+
         bool Register(RE::BSScript::IVirtualMachine* a_vm)
         {
             if (!a_vm) {
@@ -338,6 +374,10 @@ namespace JM::RoadEncounters
                 "IsSSSWhoringPackageActive",
                 kScriptName,
                 IsSSSWhoringPackageActive);
+            a_vm->RegisterFunction(
+                "IsSSSWhoringDialogueActive",
+                kScriptName,
+                IsSSSWhoringDialogueActive);
 
             logger::info("Registered Papyrus class {}", kScriptName);
             if (g_sssLogger) {
