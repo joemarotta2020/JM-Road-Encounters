@@ -5,3 +5,8 @@ The DLL only finds nearby loaded actors. Encounter classification and gameplay r
 Bool Function IsAvailable() Global Native
 
 Actor[] Function GetNearbyActors(ObjectReference akCenter, Float afRadius = 3500.0, Int aiMaxResults = 32) Global Native
+
+; Returns the authoritative SSS_Whoring quest alias index for akActor by
+; evaluating the four loaded SSS_WhoringIdle INFO condition chains directly.
+; Returns -1 when the actor is not currently eligible.
+Int Function ClassifySSSWhoringActor(Actor akActor) Global Native
