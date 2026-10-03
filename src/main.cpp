@@ -92,42 +92,21 @@ namespace JM::RoadEncounters
             const RE::TESCondition& a_conditions,
             RE::ConditionCheckParams& a_params)
         {
-            // Mirror Skyrim's flat AND / OR-block semantics while retaining
-            // the full ConditionCheckParams context (especially quest aliases).
-            auto* condition = a_conditions.head;
-            bool isORtrue = false;
-            bool wasOR = false;
-
-            while (condition) {
-                const bool isOR = condition->data.flags.isOR;
-
-                if (!wasOR && isOR) {
-                    isORtrue = condition->IsTrue(a_params);
-                } else if (wasOR && !isOR) {
-                    // The first non-OR condition after an OR-marked run is the
-                    // final member of that OR block.
-                    if (!isORtrue) {
-                        isORtrue = condition->IsTrue(a_params);
-                    }
-                    if (!isORtrue) {
+            // Creation Kit lists are ANDs of OR-groups.  The last member of
+            // each OR-group has isOR=false.
+            bool group = false;
+            for (auto* condition = a_conditions.head; condition; condition = condition->next) {
+                group = group || condition->IsTrue(a_params);
+                if (!condition->data.flags.isOR) {
+                    if (!group) {
                         return false;
                     }
-                    isORtrue = false;
-                } else if (wasOR && isOR) {
-                    if (!isORtrue) {
-                        isORtrue = condition->IsTrue(a_params);
-                    }
-                } else {
-                    if (!condition->IsTrue(a_params)) {
-                        return false;
-                    }
+                    group = false;
+                } else if (!condition->next) {
+                    return group;
                 }
-
-                wasOR = isOR;
-                condition = condition->next;
             }
-
-            return !wasOR || isORtrue;
+            return true;
         }
 
         bool EvaluateSSSTopicInfo(
@@ -139,16 +118,30 @@ namespace JM::RoadEncounters
                 return false;
             }
 
-            RE::ConditionCheckParams params(a_speaker, a_target);
             auto* quest =
                 a_info->parentTopic ? a_info->parentTopic->ownerQuest : nullptr;
-            params.quest = quest;
+            if (!quest || !quest->IsRunning() || quest->IsDeleted()) {
+                return false;
+            }
 
-            // Dialogue evaluation supplies the owning quest in the condition
-            // context.  Calling TESCondition::IsTrue(speaker, target) alone
-            // drops that context, causing alias/quest-dependent SSS INFO
-            // conditions to evaluate false even for valid actors.
-            if (quest && !EvaluateConditionList(quest->objConditions, params)) {
+            // CommonLibSSE-NG v3.7.0 still exposes the legacy 0x30
+            // ConditionCheckParams layout.  In Skyrim SE 1.5.97, unk10 is the
+            // owning quest pointer and the engine layout also contains a
+            // package-data pointer at +0x30.  Reserve that final slot so native
+            // condition functions see the same layout used by dialogue.
+            struct LegacyDialogueConditionParams
+            {
+                RE::ConditionCheckParams value;
+                void* packageData{};
+            } storage{{ a_speaker, a_target }};
+            static_assert(sizeof(LegacyDialogueConditionParams) == 0x38);
+
+            auto& params = storage.value;
+            params.unk10 = quest;
+
+            // Dialogue evaluates owning-quest conditions before INFO
+            // conditions using the same contextual parameter block.
+            if (!EvaluateConditionList(quest->objConditions, params)) {
                 return false;
             }
 
