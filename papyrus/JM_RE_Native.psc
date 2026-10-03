@@ -16,7 +16,7 @@ Bool Function IsSSSWhoringPackageActive(Actor akActor, Int aiAliasIndex) Global 
 
 ; Returns the nearest currently eligible SSS_Whoring actor, using the same
 ; native high-process scan plus the loaded SSS_WhoringIdle INFO conditions.
-Actor Function FindSSSWhoringActor(ObjectReference akCenter, Float afRadius = 2200.0, Int aiMaxResults = 64) Global Native
+Actor Function FindSSSWhoringActor(ObjectReference akCenter, Float afRadius = 2200.0, Int aiMaxResults = 64, Actor akExclude1 = None, Actor akExclude2 = None, Actor akExclude3 = None) Global Native
 
 ; True only while akActor is the live dialogue speaker and the current topic belongs to SSS_Whoring.
 Bool Function IsSSSWhoringDialogueActive(Actor akActor) Global Native
