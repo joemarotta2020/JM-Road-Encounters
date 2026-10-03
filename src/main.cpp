@@ -266,6 +266,50 @@ namespace JM::RoadEncounters
             return ClassifySSSWhoringActorImpl(a_actor);
         }
 
+        RE::Actor* FindSSSWhoringActor(
+            RE::StaticFunctionTag*,
+            RE::TESObjectREFR* a_center,
+            float a_radius,
+            std::int32_t a_maxResults)
+        {
+            const auto nearby =
+                GetNearbyActors(nullptr, a_center, a_radius, a_maxResults);
+            auto* player = RE::PlayerCharacter::GetSingleton();
+
+            std::int32_t tested = 0;
+            for (auto* actor : nearby) {
+                if (!actor || actor == player) {
+                    continue;  // PlayerRef is the typed-array no-result sentinel.
+                }
+
+                ++tested;
+                const auto aliasIndex = ClassifySSSWhoringActorImpl(actor);
+                if (aliasIndex >= 0) {
+                    if (g_sssLogger) {
+                        g_sssLogger->info(
+                            "acquisition selected actor={} form=0x{:08X} "
+                            "alias={} tested={} radius={:.0f}",
+                            actor->GetName(),
+                            actor->GetFormID(),
+                            aliasIndex,
+                            tested,
+                            a_radius);
+                    }
+                    return actor;
+                }
+            }
+
+            static std::atomic<std::uint64_t> noCandidateScans{ 0 };
+            const auto scan = ++noCandidateScans;
+            if (g_sssLogger && (scan % 10) == 0) {
+                g_sssLogger->info(
+                    "acquisition scan #{} found no eligible SSS actor "
+                    "(tested={}, radius={:.0f})",
+                    scan, tested, a_radius);
+            }
+            return nullptr;
+        }
+
         bool IsSSSWhoringPackageActive(
             RE::StaticFunctionTag*,
             RE::Actor* a_actor,
@@ -286,6 +330,10 @@ namespace JM::RoadEncounters
                 "ClassifySSSWhoringActor",
                 kScriptName,
                 ClassifySSSWhoringActor);
+            a_vm->RegisterFunction(
+                "FindSSSWhoringActor",
+                kScriptName,
+                FindSSSWhoringActor);
             a_vm->RegisterFunction(
                 "IsSSSWhoringPackageActive",
                 kScriptName,
