@@ -206,9 +206,14 @@ Bool NativeDetectorChecked = False
 ; - No initialization/load/migration path may manufacture a successful encounter time.
 Float LastSuccessfulEncounterDay = 0.0
 Bool HasSuccessfulEncounter = False
+; Independent pressure anchor for the first encounter. This is NOT a success
+; timestamp and may be initialized/migrated without violating the success-clock invariant.
+Float PressureStartDay = 0.0
 Int CadenceStateVersion = 0
 Int NativeScanCounter = 0
 Int SearchPulseCounter = 0
+; Dedicated native cache slot for Road Encounters.
+Int NativeScanClientId = 1
 
 ; ELIGIBLE-notice cooldowns. Scalars are safe for mid-game script upgrades.
 Float LastEligibleMerchantDay = 0.0
@@ -318,18 +323,11 @@ Function InitializeNativeScanner(Bool abExistingSaveMigration = False)
 EndFunction
 
 Function MigrateCadenceState()
-	; v2 repairs the cadence deadlock where initialization treated
-	; "no successful encounter yet" as "successful encounter just happened".
-	; New script scalars default to zero/False on an existing save, so this runs once.
+	; v2 repaired the original fake-success timestamp deadlock.
 	If CadenceStateVersion < 2
 		Float legacyTimestamp = LastSuccessfulEncounterDay
-
 		; IMPORTANT: do not write LastSuccessfulEncounterDay here.
-		; It is intentionally ignored until CommitEncounter() records a real success.
 		HasSuccessfulEncounter = False
-
-		; Clear governor/category gates that may have been persisted by the broken
-		; pre-v2 cadence state. The next eligible outdoor pulse may scan immediately.
 		GlobalNextEncounterDay = 0.0
 		NextRogueRollDay = 0.0
 		NextRefugeeRollDay = 0.0
@@ -339,11 +337,30 @@ Function MigrateCadenceState()
 		NextMagicianRollDay = 0.0
 		NextBountyHunterRollDay = 0.0
 		NextHydraCaravanRollDay = 0.0
-
 		CadenceStateVersion = 2
-
 		If DebugMode
 			LogCadenceDiagnostic("[JM_RE][CADENCE] MIGRATE v2 repaired legacy cadence. hasSuccess=False legacyTimestampIgnored=" + legacyTimestamp + " scannerEligible=TRUE")
+		EndIf
+	EndIf
+
+	; v3 separates first-encounter pressure from the successful-encounter clock.
+	If CadenceStateVersion < 3
+		Float nowDay = Utility.GetCurrentGameTime()
+		If !HasSuccessfulEncounter
+			PressureStartDay = nowDay - (QuietHours / 24.0)
+			GlobalNextEncounterDay = 0.0
+			NextRogueRollDay = 0.0
+			NextRefugeeRollDay = 0.0
+			NextPilgrimRollDay = 0.0
+			NextVigilantRollDay = 0.0
+			NextMerchantRollDay = 0.0
+			NextMagicianRollDay = 0.0
+			NextBountyHunterRollDay = 0.0
+			NextHydraCaravanRollDay = 0.0
+		EndIf
+		CadenceStateVersion = 3
+		If DebugMode
+			LogCadenceDiagnostic("[JM_RE][CADENCE] MIGRATE v3 pressureStartDay=" + PressureStartDay + " hasSuccess=" + HasSuccessfulEncounter + " pressureHours=" + GetHoursSinceSuccessfulEncounter())
 		EndIf
 	EndIf
 EndFunction
@@ -368,7 +385,7 @@ Function NativeWakeScanner()
 	NativeDetectorChecked = True
 
 	If DebugMode
-		LogCadenceDiagnostic("[JM_RE][SCAN] post-load native wake. dllAvailable=" + NativeDetectorAvailable + " cadenceVersion=" + CadenceStateVersion + " hasSuccess=" + HasSuccessfulEncounter + " lastSuccessDay=" + LastSuccessfulEncounterDay + " elapsedHours=" + GetHoursSinceSuccessfulEncounter())
+		LogCadenceDiagnostic("[JM_RE][SCAN] post-load native wake. dllAvailable=" + NativeDetectorAvailable + " cadenceVersion=" + CadenceStateVersion + " hasSuccess=" + HasSuccessfulEncounter + " lastSuccessDay=" + LastSuccessfulEncounterDay + " pressureStartDay=" + PressureStartDay + " elapsedHours=" + GetHoursSinceSuccessfulEncounter())
 	EndIf
 
 	RegisterForSingleUpdate(1.0)
@@ -401,14 +418,19 @@ Function LogCadenceDiagnostic(String asMessage)
 EndFunction
 
 Float Function GetHoursSinceSuccessfulEncounter()
-	; No successful encounter is not a cooldown. Treat first-run/no-history state
-	; as immediately past the quiet window so normal encounter rolls may begin.
+	Float nowDay = Utility.GetCurrentGameTime()
+
 	If !HasSuccessfulEncounter
-		Return QuietHours
+		If PressureStartDay <= 0.0 || PressureStartDay > nowDay
+			Return QuietHours
+		EndIf
+		Float pressureDays = nowDay - PressureStartDay
+		If pressureDays < 0.0
+			Return QuietHours
+		EndIf
+		Return pressureDays * 24.0
 	EndIf
 
-	; Defensive invariant handling: a committed encounter must have a valid time.
-	; Never repair the clock here; only CommitEncounter() is allowed to write it.
 	If LastSuccessfulEncounterDay <= 0.0
 		If DebugMode
 			Debug.Trace("[JM_RE][CADENCE] ERROR hasSuccess=True but lastSuccessDay invalid; bypassing quiet window without rewriting clock.")
@@ -416,14 +438,13 @@ Float Function GetHoursSinceSuccessfulEncounter()
 		Return QuietHours
 	EndIf
 
-	Float elapsedDays = Utility.GetCurrentGameTime() - LastSuccessfulEncounterDay
+	Float elapsedDays = nowDay - LastSuccessfulEncounterDay
 	If elapsedDays < 0.0
 		If DebugMode
 			Debug.Trace("[JM_RE][CADENCE] WARNING current game time precedes last success; bypassing quiet window without rewriting clock.")
 		EndIf
 		Return QuietHours
 	EndIf
-
 	Return elapsedDays * 24.0
 EndFunction
 
@@ -487,8 +508,9 @@ Function RunSearchPulse()
 	EndIf
 
 	If NativeDetectorAvailable
-		Actor[] nearby = JM_RE_Native.GetNearbyActors(PlayerRef, ScanRadius, NativeScanMaxActors)
-		EvaluateNativeCandidates(nearby, elapsedHours)
+		; Never move a native-returned Actor[] through Papyrus.
+		Int nearbyCount = JM_RE_Native.ScanNearbyActors(PlayerRef, ScanRadius, NativeScanMaxActors, NativeScanClientId)
+		EvaluateNativeCandidateCache(nearbyCount, elapsedHours)
 	Else
 		RunFallbackSearch(elapsedHours)
 		nextInterval = FallbackScanIntervalSeconds
@@ -545,28 +567,45 @@ Float Function GetOpportunityRadiusForCategory(Int aiCategory)
 	Return 0.0
 EndFunction
 
-Function EvaluateNativeCandidates(Actor[] akNearby, Float afElapsedHours)
+Function EvaluateNativeCandidateCache(Int aiNearbyCount, Float afElapsedHours)
 	NativeScanCounter += 1
-
-	If akNearby == None || akNearby.Length <= 0
+	If aiNearbyCount <= 0
 		If DebugMode && (NativeScanCounter % 10) == 0
-			Debug.Trace("[JM_RE][SCAN] native scan: no nearby high-process actors. elapsedHours=" + (afElapsedHours as Int))
+			LogCadenceDiagnostic("[JM_RE][SCAN] cache scan: actors=0 elapsedHours=" + (afElapsedHours as Int))
 		EndIf
 		Return
 	EndIf
 
 	Float nowDay = Utility.GetCurrentGameTime()
 	Int i = 0
-	While i < akNearby.Length
-		Actor candidate = akNearby[i]
+	While i < aiNearbyCount
+		Actor candidate = JM_RE_Native.GetScannedActor(NativeScanClientId, i)
 		If IsUsableCandidate(candidate) && !candidate.IsInCombat()
+			Int role = GetRoleCode(candidate)
 			Int category = GetEncounterCategory(candidate)
-			If CanCommitCategory(category, nowDay)
-				Float distance = candidate.GetDistance(PlayerRef)
+			Float distance = candidate.GetDistance(PlayerRef)
+			If category != CATEGORY_NONE
 				Float allowedRadius = GetOpportunityRadiusForCategory(category)
-				If allowedRadius > 0.0 && distance > 0.0 && distance <= allowedRadius
-					RollCadenceOpportunity(category, candidate, distance, afElapsedHours, nowDay, "native")
-					Return
+				String gate = GetCategoryGateReason(category, nowDay)
+				If gate == "eligible"
+					If allowedRadius > 0.0 && distance > 0.0 && distance <= allowedRadius
+						If DebugMode
+							LogCadenceDiagnostic("[JM_RE][CANDIDATE] category=" + GetCategoryLabel(category) + " actor=" + candidate + " distance=" + (distance as Int) + " pressureHours=" + (afElapsedHours as Int) + " result=ROLL")
+						EndIf
+						RollCadenceOpportunity(category, candidate, distance, afElapsedHours, nowDay, "native-cache")
+						Return
+					ElseIf DebugMode && (NativeScanCounter % 10) == 0
+						LogCadenceDiagnostic("[JM_RE][CANDIDATE] category=" + GetCategoryLabel(category) + " actor=" + candidate + " distance=" + (distance as Int) + " allowedRadius=" + (allowedRadius as Int) + " result=OUTSIDE-CONTACT")
+					EndIf
+				ElseIf DebugMode && (NativeScanCounter % 10) == 0
+					LogCadenceDiagnostic("[JM_RE][CANDIDATE] category=" + GetCategoryLabel(category) + " actor=" + candidate + " distance=" + (distance as Int) + " result=BLOCKED reason=" + gate)
+				EndIf
+			ElseIf DebugMode && (NativeScanCounter % 10) == 0
+				If role == ROLE_ADVENTURER
+					Int advRole = JM_RE_PLRPProvider.GetAdventurerRole(candidate)
+					LogCadenceDiagnostic("[JM_RE][OBSERVE] actor=" + candidate + " population=ADVENTURER subtype=" + advRole + " live=" + (advRole == 4))
+				ElseIf HydraProviderLoaded && JM_RE_HydraProvider.IsSacredBand(candidate)
+					LogCadenceDiagnostic("[JM_RE][OBSERVE] actor=" + candidate + " population=SACRED_BAND live=FALSE reason=observation-only")
 				EndIf
 			EndIf
 		EndIf
@@ -574,8 +613,84 @@ Function EvaluateNativeCandidates(Actor[] akNearby, Float afElapsedHours)
 	EndWhile
 
 	If DebugMode && (NativeScanCounter % 10) == 0
-		Debug.Trace("[JM_RE][SCAN] native scan: actors=" + akNearby.Length + " but no eligible encounter actor. elapsedHours=" + (afElapsedHours as Int))
+		LogCadenceDiagnostic("[JM_RE][SCAN] cache scan: actors=" + aiNearbyCount + " result=no-live-opportunity pressureHours=" + (afElapsedHours as Int))
 	EndIf
+EndFunction
+
+String Function GetCategoryGateReason(Int aiCategory, Float afNowDay)
+	If !GovernorEnabled
+		Return "governor-disabled"
+	EndIf
+	If aiCategory == CATEGORY_NONE
+		Return "not-live-category"
+	EndIf
+	If afNowDay < GlobalNextEncounterDay
+		Return "global-cooldown"
+	EndIf
+	If aiCategory == CATEGORY_ROGUE
+		If !LiveRogueEnabled
+			Return "category-disabled"
+		ElseIf afNowDay < NextRogueRollDay
+			Return "category-cooldown"
+		EndIf
+	ElseIf aiCategory == CATEGORY_REFUGEE
+		If !LiveRefugeeEnabled
+			Return "category-disabled"
+		ElseIf RefugeeRequestMessage == None
+			Return "message-missing"
+		ElseIf afNowDay < NextRefugeeRollDay
+			Return "category-cooldown"
+		EndIf
+	ElseIf aiCategory == CATEGORY_PILGRIM
+		If !LivePilgrimEnabled
+			Return "category-disabled"
+		ElseIf PilgrimRequestMessage == None
+			Return "message-missing"
+		ElseIf afNowDay < NextPilgrimRollDay
+			Return "category-cooldown"
+		EndIf
+	ElseIf aiCategory == CATEGORY_VIGILANT
+		If !LiveVigilantEnabled
+			Return "category-disabled"
+		ElseIf VigilantInspectionMessage == None
+			Return "message-missing"
+		ElseIf afNowDay < NextVigilantRollDay
+			Return "category-cooldown"
+		EndIf
+	ElseIf aiCategory == CATEGORY_MERCHANT
+		If !LiveMerchantEnabled
+			Return "category-disabled"
+		ElseIf afNowDay < NextMerchantRollDay
+			Return "category-cooldown"
+		EndIf
+	ElseIf aiCategory == CATEGORY_MAGICIAN
+		If !LiveMagicianEnabled
+			Return "category-disabled"
+		ElseIf MagicianServiceMessage == None
+			Return "message-missing"
+		ElseIf afNowDay < NextMagicianRollDay
+			Return "category-cooldown"
+		EndIf
+	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER
+		If !LiveBountyHunterEnabled
+			Return "category-disabled"
+		ElseIf BountyHunterMessage == None
+			Return "message-missing"
+		ElseIf afNowDay < NextBountyHunterRollDay
+			Return "category-cooldown"
+		EndIf
+	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
+		If !LiveHydraCaravanEnabled
+			Return "category-disabled"
+		ElseIf HydraCaravanMessage == None
+			Return "message-missing"
+		ElseIf afNowDay < NextHydraCaravanRollDay
+			Return "category-cooldown"
+		EndIf
+	Else
+		Return "unknown-category"
+	EndIf
+	Return "eligible"
 EndFunction
 
 Function RunFallbackSearch(Float afElapsedHours)
@@ -675,69 +790,51 @@ Int Function GetEncounterCategory(Actor akActor)
 EndFunction
 
 Bool Function CanCommitCategory(Int aiCategory, Float afNowDay)
-	If !GovernorEnabled || aiCategory == CATEGORY_NONE
-		Return False
-	EndIf
-
-	If afNowDay < GlobalNextEncounterDay
-		Return False
-	EndIf
-
-	If aiCategory == CATEGORY_ROGUE
-		Return LiveRogueEnabled && afNowDay >= NextRogueRollDay
-	ElseIf aiCategory == CATEGORY_REFUGEE
-		Return LiveRefugeeEnabled && RefugeeRequestMessage != None && afNowDay >= NextRefugeeRollDay
-	ElseIf aiCategory == CATEGORY_PILGRIM
-		Return LivePilgrimEnabled && PilgrimRequestMessage != None && afNowDay >= NextPilgrimRollDay
-	ElseIf aiCategory == CATEGORY_VIGILANT
-		Return LiveVigilantEnabled && VigilantInspectionMessage != None && afNowDay >= NextVigilantRollDay
-	ElseIf aiCategory == CATEGORY_MERCHANT
-		Return LiveMerchantEnabled && afNowDay >= NextMerchantRollDay
-	ElseIf aiCategory == CATEGORY_MAGICIAN
-		Return LiveMagicianEnabled && MagicianServiceMessage != None && afNowDay >= NextMagicianRollDay
-	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER
-		Return LiveBountyHunterEnabled && BountyHunterMessage != None && afNowDay >= NextBountyHunterRollDay
-	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
-		Return LiveHydraCaravanEnabled && HydraCaravanMessage != None && afNowDay >= NextHydraCaravanRollDay
-	EndIf
-
-	Return False
+	Return GetCategoryGateReason(aiCategory, afNowDay) == "eligible"
 EndFunction
 
-Function CommitEncounter(Int aiCategory, Actor akActor, Float afDistance, Float afNowDay, String asSource)
+Bool Function CommitEncounter(Int aiCategory, Actor akActor, Float afDistance, Float afNowDay, String asSource)
 	If akActor == None || aiCategory == CATEGORY_NONE
-		Return
+		Return False
 	EndIf
 
-	; ONLY a real player-facing encounter may start/reset cadence.
+	Bool started = False
+	If aiCategory == CATEGORY_ROGUE
+		started = ResolveRogueEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_REFUGEE
+		started = ResolveRefugeeEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_PILGRIM
+		started = ResolvePilgrimEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_VIGILANT
+		started = ResolveVigilantEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_MERCHANT
+		started = ResolveMerchantEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_MAGICIAN
+		started = ResolveMagicianEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER
+		started = ResolveBountyHunterEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
+		started = ResolveHydraCaravanEncounter(akActor, afDistance)
+	EndIf
+
+	If !started
+		SetFailedRollCooldown(aiCategory, afNowDay)
+		If DebugMode
+			LogCadenceDiagnostic("[JM_RE][DIRECTOR] ABORT source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " reason=resolver-did-not-start")
+		EndIf
+		Return False
+	EndIf
+
 	Float oldSuccessDay = LastSuccessfulEncounterDay
 	LastSuccessfulEncounterDay = afNowDay
 	HasSuccessfulEncounter = True
 	GlobalNextEncounterDay = afNowDay + (GlobalEncounterCooldownHours / 24.0)
 	SetCategorySuccessCooldown(aiCategory, afNowDay, GetCategorySuccessCooldownHours(aiCategory))
-
 	If DebugMode
 		LogCadenceDiagnostic("[JM_RE][CLOCK] LastSuccessfulEncounterDay old=" + oldSuccessDay + " new=" + LastSuccessfulEncounterDay + " reason=SUCCESSFUL_COMMIT category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor)
 		LogCadenceDiagnostic("[JM_RE][DIRECTOR] COMMIT source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " distance=" + (afDistance as Int))
 	EndIf
-
-	If aiCategory == CATEGORY_ROGUE
-		ResolveRogueEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_REFUGEE
-		ResolveRefugeeEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_PILGRIM
-		ResolvePilgrimEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_VIGILANT
-		ResolveVigilantEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_MERCHANT
-		ResolveMerchantEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_MAGICIAN
-		ResolveMagicianEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER
-		ResolveBountyHunterEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
-		ResolveHydraCaravanEncounter(akActor, afDistance)
-	EndIf
+	Return True
 EndFunction
 
 Bool Function CanObserve()
@@ -1364,38 +1461,9 @@ Function SetFailedRollCooldown(Int aiCategory, Float afNowDay)
 EndFunction
 
 Function HandleTriggeredOpportunity(Int aiCategory, Actor akActor, Float afDistance, Float afRoll, Float afChance, Float afNowDay)
-	Float categoryCooldownHours = GetCategorySuccessCooldownHours(aiCategory)
-
-	GlobalNextEncounterDay = afNowDay + (GlobalEncounterCooldownHours / 24.0)
-	SetCategorySuccessCooldown(aiCategory, afNowDay, categoryCooldownHours)
-
-	If aiCategory == CATEGORY_ROGUE && LiveRogueEnabled
-		ResolveRogueEncounter(akActor, afDistance)
-
-	ElseIf aiCategory == CATEGORY_REFUGEE && LiveRefugeeEnabled
-		ResolveRefugeeEncounter(akActor, afDistance)
-
-	ElseIf aiCategory == CATEGORY_PILGRIM && LivePilgrimEnabled
-		ResolvePilgrimEncounter(akActor, afDistance)
-
-	ElseIf aiCategory == CATEGORY_VIGILANT && LiveVigilantEnabled
-		ResolveVigilantEncounter(akActor, afDistance)
-
-	ElseIf aiCategory == CATEGORY_MERCHANT && LiveMerchantEnabled
-		ResolveMerchantEncounter(akActor, afDistance)
-
-	ElseIf aiCategory == CATEGORY_MAGICIAN && LiveMagicianEnabled
-		ResolveMagicianEncounter(akActor, afDistance)
-
-	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER && LiveBountyHunterEnabled
-		ResolveBountyHunterEncounter(akActor, afDistance)
-
-	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN && LiveHydraCaravanEnabled
-		ResolveHydraCaravanEncounter(akActor, afDistance)
-	EndIf
-
+	Bool committed = CommitEncounter(aiCategory, akActor, afDistance, afNowDay, "legacy-governor")
 	If DebugMode
-		Debug.Trace("[JM_RE][GOVERNOR] TRIGGER category=" + GetCategoryLabel(aiCategory) + " distance=" + (afDistance as Int) + " roll=" + (afRoll as Int) + " chance=" + (afChance as Int) + " globalCooldownHours=" + (GlobalEncounterCooldownHours as Int))
+		Debug.Trace("[JM_RE][GOVERNOR] TRIGGER category=" + GetCategoryLabel(aiCategory) + " distance=" + (afDistance as Int) + " roll=" + (afRoll as Int) + " chance=" + (afChance as Int) + " committed=" + committed)
 	EndIf
 EndFunction
 
@@ -1421,10 +1489,10 @@ Function SetCategorySuccessCooldown(Int aiCategory, Float afNowDay, Float afHour
 	EndIf
 EndFunction
 
-Function ResolvePilgrimEncounter(Actor akPilgrim, Float afDistance)
+Bool Function ResolvePilgrimEncounter(Actor akPilgrim, Float afDistance)
 	If PilgrimRequestMessage == None
 		Debug.Trace("[JM_RE][PILGRIM] ERROR: PilgrimRequestMessage property is None.")
-		Return
+		Return False
 	EndIf
 
 	Int choice = PilgrimRequestMessage.Show()
@@ -1444,12 +1512,13 @@ Function ResolvePilgrimEncounter(Actor akPilgrim, Float afDistance)
 		Debug.Notification("You decline the pilgrim's request.")
 		Debug.Trace("[JM_RE][PILGRIM] DECLINED")
 	EndIf
+	Return True
 EndFunction
 
-Function ResolveRefugeeEncounter(Actor akRefugee, Float afDistance)
+Bool Function ResolveRefugeeEncounter(Actor akRefugee, Float afDistance)
 	If RefugeeRequestMessage == None
 		Debug.Trace("[JM_RE][REFUGEE] ERROR: RefugeeRequestMessage property is None.")
-		Return
+		Return False
 	EndIf
 
 	Int choice = RefugeeRequestMessage.Show()
@@ -1469,22 +1538,24 @@ Function ResolveRefugeeEncounter(Actor akRefugee, Float afDistance)
 		Debug.Notification("You leave the refugee to continue alone.")
 		Debug.Trace("[JM_RE][REFUGEE] DECLINED")
 	EndIf
+	Return True
 EndFunction
 
-Function ResolveMerchantEncounter(Actor akMerchant, Float afDistance)
+Bool Function ResolveMerchantEncounter(Actor akMerchant, Float afDistance)
 	If akMerchant == None
-		Return
+		Return False
 	EndIf
 
 	Debug.Notification("A travelling merchant offers to trade.")
 	Debug.Trace("[JM_RE][MERCHANT] BARTER distance=" + (afDistance as Int))
 	akMerchant.ShowBarterMenu()
+	Return True
 EndFunction
 
-Function ResolveMagicianEncounter(Actor akMagician, Float afDistance)
+Bool Function ResolveMagicianEncounter(Actor akMagician, Float afDistance)
 	If MagicianServiceMessage == None
 		Debug.Trace("[JM_RE][MAGICIAN] ERROR: MagicianServiceMessage property is None.")
-		Return
+		Return False
 	EndIf
 
 	Int choice = MagicianServiceMessage.Show()
@@ -1507,11 +1578,12 @@ Function ResolveMagicianEncounter(Actor akMagician, Float afDistance)
 		Debug.Notification("You decline the magician's offer.")
 		Debug.Trace("[JM_RE][MAGICIAN] DECLINED")
 	EndIf
+	Return True
 EndFunction
 
-Function ResolveBountyHunterEncounter(Actor akHunter, Float afDistance)
+Bool Function ResolveBountyHunterEncounter(Actor akHunter, Float afDistance)
 	If akHunter == None || BountyHunterMessage == None
-		Return
+		Return False
 	EndIf
 
 	Int choice = BountyHunterMessage.Show()
@@ -1533,11 +1605,12 @@ Function ResolveBountyHunterEncounter(Actor akHunter, Float afDistance)
 		Debug.Trace("[JM_RE][BOUNTY] REFUSED_COMBAT distance=" + (afDistance as Int))
 		akHunter.StartCombat(PlayerRef)
 	EndIf
+	Return True
 EndFunction
 
-Function ResolveVigilantEncounter(Actor akVigilant, Float afDistance)
+Bool Function ResolveVigilantEncounter(Actor akVigilant, Float afDistance)
 	If akVigilant == None || VigilantInspectionMessage == None
-		Return
+		Return False
 	EndIf
 
 	Int choice = VigilantInspectionMessage.Show()
@@ -1559,11 +1632,12 @@ Function ResolveVigilantEncounter(Actor akVigilant, Float afDistance)
 		Debug.Trace("[JM_RE][VIGILANT] REFUSED_COMBAT distance=" + (afDistance as Int))
 		akVigilant.StartCombat(PlayerRef)
 	EndIf
+	Return True
 EndFunction
 
-Function ResolveHydraCaravanEncounter(Actor akLeader, Float afDistance)
+Bool Function ResolveHydraCaravanEncounter(Actor akLeader, Float afDistance)
 	If akLeader == None || HydraCaravanMessage == None
-		Return
+		Return False
 	EndIf
 
 	Int choice = HydraCaravanMessage.Show()
@@ -1585,22 +1659,24 @@ Function ResolveHydraCaravanEncounter(Actor akLeader, Float afDistance)
 		Debug.Trace("[JM_RE][HYDRA] REFUSED_COMBAT distance=" + (afDistance as Int))
 		akLeader.StartCombat(PlayerRef)
 	EndIf
+	Return True
 EndFunction
 
-Function ResolveRogueEncounter(Actor akRogue, Float afDistance)
+Bool Function ResolveRogueEncounter(Actor akRogue, Float afDistance)
 	If akRogue == None
-		Return
+		Return False
 	EndIf
 
 	MiscObject goldForm = Game.GetForm(0x0000000F) as MiscObject
 	If goldForm == None
-		Return
+		Return False
 	EndIf
 
 	Int playerGold = PlayerRef.GetItemCount(goldForm)
 	If playerGold <= 0
-		Debug.Trace("[JM_RE][ROGUE] No gold available to steal.")
-		Return
+		Debug.Notification("An adventurer rogue checks your empty coin purse and moves on.")
+		Debug.Trace("[JM_RE][ROGUE] NO_GOLD distance=" + (afDistance as Int))
+		Return True
 	EndIf
 
 	Float rogueSkill = akRogue.GetActorValue("Pickpocket")
@@ -1649,6 +1725,7 @@ Function ResolveRogueEncounter(Actor akRogue, Float afDistance)
 		Debug.Notification("You catch the adventurer rogue reaching for your coin purse.")
 		Debug.Trace("[JM_RE][ROGUE] THEFT_CAUGHT distance=" + (afDistance as Int) + " chance=" + (successChance as Int) + " roll=" + (theftRoll as Int))
 	EndIf
+	Return True
 EndFunction
 
 Float Function GetCategorySuccessCooldownHours(Int aiCategory)
