@@ -33,55 +33,13 @@ Faction Function GetSacredBandFaction() Global
 EndFunction
 
 Bool Function IsSacredBand(Actor akActor) Global
-	; Exact 15-member hyd_sacredband classifier from JM_RE_HydraAudit.
-	; This group is distinct from caravan/slaver populations.
-
+	; The dedicated hyd_sacredband faction is the authoritative and cheapest
+	; classifier for this observation-only population.
 	If akActor == None
 		Return False
 	EndIf
-
-	; Shrine group.
-	If BaseMatches(akActor, 0x0006CC38)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006CC3B)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006CC3C)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006CC41)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006CC46)
-		Return True
-
-	; Half-Moon group.
-	ElseIf BaseMatches(akActor, 0x0006D1B7)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006D1B8)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006D1B9)
-		Return True
-
-	; Treva group.
-	ElseIf BaseMatches(akActor, 0x0006D1C5)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006D1C6)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0006D1C7)
-		Return True
-
-	; Eastmarch member.
-	ElseIf BaseMatches(akActor, 0x0007352A)
-		Return True
-
-	; Hjaalmarch group.
-	ElseIf BaseMatches(akActor, 0x00073531)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0007353E)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0007353F)
-		Return True
-	EndIf
-
-	Return False
+	Faction sacredFaction = GetSacredBandFaction()
+	Return sacredFaction != None && akActor.IsInFaction(sacredFaction)
 EndFunction
 
 Bool Function BaseMatches(Actor akActor, Int aiLocalFormID) Global
@@ -263,9 +221,15 @@ EndFunction
 
 Int Function GetCaravanRole(Actor akActor) Global
 	; 0 none, 1 leader, 2 guard, 3 slave.
-	; Exact ActorBase matching only.
+	; Fast faction gate first; exact ActorBase matching only runs for actual
+	; hyd_caravans members instead of every NPC seen by Road Encounters.
 
 	If akActor == None
+		Return 0
+	EndIf
+
+	Faction caravanFaction = GetCaravanFaction()
+	If caravanFaction == None || !akActor.IsInFaction(caravanFaction)
 		Return 0
 	EndIf
 
