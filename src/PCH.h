@@ -9,6 +9,8 @@
 #include <REL/Relocation.h>
 
 #include <algorithm>
+#include <array>
+#include <mutex>
 #include <cstdint>
 #include <memory>
 #include <string>
