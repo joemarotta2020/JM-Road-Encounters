@@ -4,9 +4,9 @@ Scriptname JM_SSS_WhoringController extends Quest
 ;
 ; Acquisition architecture:
 ; - JM_RoadEncounters.dll performs the nearby high-process actor scan.
-; - The DLL prefers the ACTUAL loaded SSS_WhoringIdle INFO conditions, but
-;   uses a conservative explicit classifier when dialogue-condition emulation
-;   cannot classify anyone. The ORIGINAL SSS alias/package is the final authority.
+; - The DLL uses explicit, cheap actor classification; it does NOT try to
+;   emulate opaque SSS dialogue INFO condition chains.
+; - The ORIGINAL SSS alias/package/dialogue path is the final authority.
 ; - Once an actor qualifies, this script force-fills the ORIGINAL SSS_Whoring
 ;   alias and lets the ORIGINAL SSS force-greet package drive the approach.
 ; - Cooldown is committed only after the native service verifies that the
