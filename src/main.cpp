@@ -471,10 +471,22 @@ namespace JM::RoadEncounters
                 GetNearbyActors(nullptr, a_center, a_radius, a_maxResults);
             auto* player = RE::PlayerCharacter::GetSingleton();
 
+            RE::Actor* fallbackSpecial = nullptr;
+            SSSClassificationResult fallbackSpecialClass{};
+            RE::Actor* fallbackGeneral = nullptr;
+            SSSClassificationResult fallbackGeneralClass{};
+
             std::int32_t tested = 0;
+            std::int32_t rejectedInvalid = 0;
+            std::int32_t rejectedChild = 0;
+            std::int32_t rejectedTeammate = 0;
+            std::int32_t rejectedCombat = 0;
+            std::int32_t rejectedHostile = 0;
+            std::int32_t rejectedCannotTalk = 0;
+
             for (auto* actor : nearby) {
                 if (!actor || actor == player) {
-                    continue;  // PlayerRef is the typed-array no-result sentinel.
+                    continue;
                 }
                 if (actor == a_exclude1 ||
                     actor == a_exclude2 ||
@@ -485,30 +497,93 @@ namespace JM::RoadEncounters
                 ++tested;
                 const auto classification =
                     ClassifySSSWhoringActorDetailed(actor);
+
                 if (classification.aliasIndex >= 0) {
-                    if (g_sssLogger) {
-                        g_sssLogger->info(
-                            "acquisition selected actor={} form=0x{:08X} "
-                            "alias={} mode={} reason={} tested={} radius={:.0f}",
-                            actor->GetName(),
-                            actor->GetFormID(),
-                            classification.aliasIndex,
-                            classification.mode,
-                            classification.reason,
-                            tested,
-                            a_radius);
+                    // Exact SSS INFO eligibility is always strongest evidence.
+                    if (std::string_view(classification.mode) == "exact") {
+                        if (g_sssLogger) {
+                            g_sssLogger->info(
+                                "acquisition selected actor={} form=0x{:08X} "
+                                "alias={} mode={} reason={} tested={} radius={:.0f}",
+                                actor->GetName(),
+                                actor->GetFormID(),
+                                classification.aliasIndex,
+                                classification.mode,
+                                classification.reason,
+                                tested,
+                                a_radius);
+                        }
+                        return actor;
                     }
-                    return actor;
+
+                    // Prefer explicit force-greet archetypes (guards/bandits)
+                    // over generic clients, while preserving nearest-first
+                    // ordering within each tier.
+                    if ((classification.aliasIndex == 3 ||
+                         classification.aliasIndex == 5) &&
+                        !fallbackSpecial) {
+                        fallbackSpecial = actor;
+                        fallbackSpecialClass = classification;
+                    } else if (classification.aliasIndex == 0 &&
+                               !fallbackGeneral) {
+                        fallbackGeneral = actor;
+                        fallbackGeneralClass = classification;
+                    }
+                    continue;
                 }
+
+                const std::string_view reason = classification.reason;
+                if (reason == "invalid") {
+                    ++rejectedInvalid;
+                } else if (reason == "child") {
+                    ++rejectedChild;
+                } else if (reason == "teammate") {
+                    ++rejectedTeammate;
+                } else if (reason == "in-combat") {
+                    ++rejectedCombat;
+                } else if (reason == "hostile") {
+                    ++rejectedHostile;
+                } else if (reason == "cannot-talk") {
+                    ++rejectedCannotTalk;
+                }
+            }
+
+            RE::Actor* selected =
+                fallbackSpecial ? fallbackSpecial : fallbackGeneral;
+            const auto selectedClass =
+                fallbackSpecial ? fallbackSpecialClass : fallbackGeneralClass;
+            if (selected) {
+                if (g_sssLogger) {
+                    g_sssLogger->info(
+                        "acquisition selected actor={} form=0x{:08X} "
+                        "alias={} mode={} reason={} tested={} radius={:.0f}",
+                        selected->GetName(),
+                        selected->GetFormID(),
+                        selectedClass.aliasIndex,
+                        selectedClass.mode,
+                        selectedClass.reason,
+                        tested,
+                        a_radius);
+                }
+                return selected;
             }
 
             static std::atomic<std::uint64_t> noCandidateScans{ 0 };
             const auto scan = ++noCandidateScans;
             if (g_sssLogger && (scan % 10) == 0) {
                 g_sssLogger->info(
-                    "acquisition scan #{} found no eligible SSS actor "
-                    "(tested={}, radius={:.0f})",
-                    scan, tested, a_radius);
+                    "acquisition scan #{} found no usable SSS actor "
+                    "(tested={}, invalid={}, child={}, teammate={}, combat={}, "
+                    "hostile={}, cannotTalk={}, radius={:.0f})",
+                    scan,
+                    tested,
+                    rejectedInvalid,
+                    rejectedChild,
+                    rejectedTeammate,
+                    rejectedCombat,
+                    rejectedHostile,
+                    rejectedCannotTalk,
+                    a_radius);
             }
             return nullptr;
         }
