@@ -217,18 +217,11 @@ namespace JM::RoadEncounters
                 return { -1, "none", "invalid" };
             }
 
-            // Prefer the original, winning SSS INFO conditions whenever the
-            // engine-compatible evaluator can resolve them.
-            const auto exactAlias = ClassifySSSWhoringActorExactImpl(a_actor);
-            if (exactAlias >= 0) {
-                return { exactAlias, "exact", "info-conditions" };
-            }
-
-            // Reliability fallback.  The original SSS alias/package remains
-            // the final authority: a candidate that cannot actually run the
-            // force-greet is rejected by the controller without consuming
-            // cooldown.  This layer only prevents opaque INFO emulation from
-            // starving acquisition forever.
+            // Acquisition classification is deliberately explicit and cheap.
+            // Do NOT emulate SSS dialogue INFO conditions here. The original
+            // alias/package/dialogue path remains the final behavioral authority:
+            // a candidate that cannot actually run the force-greet is rejected
+            // by the controller without consuming cooldown.
             if (a_actor->IsChild()) {
                 return { -1, "fallback", "child" };
             }
@@ -499,23 +492,6 @@ namespace JM::RoadEncounters
                     ClassifySSSWhoringActorDetailed(actor);
 
                 if (classification.aliasIndex >= 0) {
-                    // Exact SSS INFO eligibility is always strongest evidence.
-                    if (std::string_view(classification.mode) == "exact") {
-                        if (g_sssLogger) {
-                            g_sssLogger->info(
-                                "acquisition selected actor={} form=0x{:08X} "
-                                "alias={} mode={} reason={} tested={} radius={:.0f}",
-                                actor->GetName(),
-                                actor->GetFormID(),
-                                classification.aliasIndex,
-                                classification.mode,
-                                classification.reason,
-                                tested,
-                                a_radius);
-                        }
-                        return actor;
-                    }
-
                     // Prefer explicit force-greet archetypes (guards/bandits)
                     // over generic clients, while preserving nearest-first
                     // ordering within each tier.
