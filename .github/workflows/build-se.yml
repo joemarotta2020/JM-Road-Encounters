@@ -43,6 +43,53 @@ jobs:
         run: |
           cmake --build build --config Release --target JM_RoadEncounters -- /m
 
+      - name: Prepare Caprica Papyrus toolchain
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path .github\Caprica | Out-Null
+          gh release download 0.3.0a -R KrisV-777/Caprica --pattern "Caprica.zip" --dir .github --clobber
+          7z x .github\Caprica.zip "-o.github\Caprica" -y
+          if (-not (Test-Path ".github\Caprica\Caprica.exe")) { throw "Caprica.exe not found after extraction." }
+
+          New-Item -ItemType Directory -Force -Path .github\Papyrus | Out-Null
+          foreach ($sourceName in @("SRC", "SRC_SKYUI", "SRC_PAPUTIL")) {
+            $target = ".github\Papyrus\$sourceName"
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+            Push-Location $target
+            git init
+            git remote add origin https://github.com/IHateMyKite/PAPYRUS.git
+            git sparse-checkout set --no-cone $sourceName
+            git fetch --depth=1 origin main
+            git checkout main
+            Remove-Item .git -Recurse -Force
+            Pop-Location
+          }
+
+          $flagsTemp = ".github\Papyrus\flags-temp"
+          New-Item -ItemType Directory -Force -Path $flagsTemp | Out-Null
+          Push-Location $flagsTemp
+          git init
+          git remote add origin https://github.com/Rukan/Grimy-Skyrim-Papyrus-Source.git
+          git sparse-checkout set --no-cone TESV_Papyrus_Flags.flg
+          git fetch --depth=1 origin master
+          git checkout master
+          Copy-Item TESV_Papyrus_Flags.flg ..\SRC\TESV_Papyrus_Flags.flg
+          Pop-Location
+          Remove-Item $flagsTemp -Recurse -Force
+
+      - name: Compile Papyrus sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path build\papyrus | Out-Null
+          .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus" -R -q
+          foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_SSS_WhoringController.pex")) {
+            if (-not (Test-Path "build\papyrus\$required")) { throw "Required Papyrus output missing: $required" }
+          }
+
       - name: Verify SKSE plugin exports
         shell: pwsh
         run: |
@@ -62,6 +109,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path artifact\SKSE\Plugins | Out-Null
+          New-Item -ItemType Directory -Force -Path artifact\Scripts | Out-Null
           New-Item -ItemType Directory -Force -Path artifact\Source\Scripts | Out-Null
 
           $dll = Get-ChildItem -Path build -Recurse -File -Filter 'JM_RoadEncounters.dll' | Select-Object -First 1
@@ -71,10 +119,8 @@ jobs:
           $pdb = Get-ChildItem -Path build -Recurse -File -Filter 'JM_RoadEncounters.pdb' | Select-Object -First 1
           if ($pdb) { Copy-Item $pdb.FullName artifact\SKSE\Plugins\JM_RoadEncounters.pdb }
 
-          Copy-Item papyrus\JM_RE_Native.psc artifact\Source\Scripts\JM_RE_Native.psc
-          if (Test-Path papyrus\JM_RE_Core.psc) {
-            Copy-Item papyrus\JM_RE_Core.psc artifact\Source\Scripts\JM_RE_Core.psc
-          }
+          Copy-Item build\papyrus\*.pex artifact\Scripts\
+          Copy-Item papyrus\*.psc artifact\Source\Scripts\
 
           "Source commit: $env:GITHUB_SHA" | Set-Content artifact\BUILD_INFO.txt
           "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
