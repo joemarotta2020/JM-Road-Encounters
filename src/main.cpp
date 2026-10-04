@@ -49,6 +49,17 @@ namespace JM::RoadEncounters
             RE::Actor* actor;
         };
 
+        constexpr std::int32_t kScanClientSlots = 8;
+        std::array<std::vector<RE::ActorHandle>, kScanClientSlots> g_scanCaches;
+        std::mutex g_scanCacheMutex;
+
+        struct SSSClassificationResult
+        {
+            std::int32_t aliasIndex{ -1 };
+            const char* mode{ "none" };
+            const char* reason{ "unknown" };
+        };
+
         float DistanceSquared(const RE::NiPoint3& a_lhs, const RE::NiPoint3& a_rhs)
         {
             const float dx = a_lhs.x - a_rhs.x;
@@ -148,7 +159,7 @@ namespace JM::RoadEncounters
             return EvaluateConditionList(a_info->objConditions, params);
         }
 
-        std::int32_t ClassifySSSWhoringActorImpl(RE::Actor* a_actor)
+        std::int32_t ClassifySSSWhoringActorExactImpl(RE::Actor* a_actor)
         {
             auto* player = RE::PlayerCharacter::GetSingleton();
             if (!player || !a_actor || a_actor == player ||
@@ -195,6 +206,58 @@ namespace JM::RoadEncounters
             }
 
             return -1;
+        }
+
+        SSSClassificationResult ClassifySSSWhoringActorDetailed(RE::Actor* a_actor)
+        {
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            if (!player || !a_actor || a_actor == player ||
+                a_actor->IsDead() || a_actor->IsDisabled() ||
+                !a_actor->Is3DLoaded()) {
+                return { -1, "none", "invalid" };
+            }
+
+            // Prefer the original, winning SSS INFO conditions whenever the
+            // engine-compatible evaluator can resolve them.
+            const auto exactAlias = ClassifySSSWhoringActorExactImpl(a_actor);
+            if (exactAlias >= 0) {
+                return { exactAlias, "exact", "info-conditions" };
+            }
+
+            // Reliability fallback.  The original SSS alias/package remains
+            // the final authority: a candidate that cannot actually run the
+            // force-greet is rejected by the controller without consuming
+            // cooldown.  This layer only prevents opaque INFO emulation from
+            // starving acquisition forever.
+            if (a_actor->IsChild()) {
+                return { -1, "fallback", "child" };
+            }
+            if (a_actor->IsPlayerTeammate()) {
+                return { -1, "fallback", "teammate" };
+            }
+            if (a_actor->IsInCombat()) {
+                return { -1, "fallback", "in-combat" };
+            }
+
+            auto* banditFaction =
+                RE::TESForm::LookupByEditorID<RE::TESFaction>("BanditFaction");
+            if (banditFaction && a_actor->IsInFaction(banditFaction)) {
+                return { 5, "fallback", "bandit" };
+            }
+
+            if (a_actor->IsHostileToActor(player)) {
+                return { -1, "fallback", "hostile" };
+            }
+
+            if (a_actor->IsGuard()) {
+                return { 3, "fallback", "guard" };
+            }
+
+            if (!a_actor->CanTalkToPlayer()) {
+                return { -1, "fallback", "cannot-talk" };
+            }
+
+            return { 0, "fallback", "general-client" };
         }
 
         bool IsSSSWhoringPackageActiveImpl(
@@ -328,11 +391,71 @@ namespace JM::RoadEncounters
             return result;
         }
 
+        std::int32_t ScanNearbyActors(
+            RE::StaticFunctionTag*,
+            RE::TESObjectREFR* a_center,
+            float a_radius,
+            std::int32_t a_maxResults,
+            std::int32_t a_clientId)
+        {
+            if (a_clientId < 0 || a_clientId >= kScanClientSlots) {
+                logger::error("ScanNearbyActors invalid clientId={}", a_clientId);
+                return 0;
+            }
+
+            const auto nearby =
+                GetNearbyActors(nullptr, a_center, a_radius, a_maxResults);
+            auto* player = RE::PlayerCharacter::GetSingleton();
+
+            std::vector<RE::ActorHandle> handles;
+            handles.reserve(nearby.size());
+            for (auto* actor : nearby) {
+                if (!actor || actor == player || actor == a_center) {
+                    continue;
+                }
+                handles.push_back(actor->GetHandle());
+            }
+
+            const auto count = static_cast<std::int32_t>(handles.size());
+            {
+                std::scoped_lock lock(g_scanCacheMutex);
+                g_scanCaches[static_cast<std::size_t>(a_clientId)] =
+                    std::move(handles);
+            }
+            return count;
+        }
+
+        RE::Actor* GetScannedActor(
+            RE::StaticFunctionTag*,
+            std::int32_t a_clientId,
+            std::int32_t a_index)
+        {
+            if (a_clientId < 0 || a_clientId >= kScanClientSlots ||
+                a_index < 0) {
+                return nullptr;
+            }
+
+            RE::ActorHandle handle;
+            {
+                std::scoped_lock lock(g_scanCacheMutex);
+                const auto& cache =
+                    g_scanCaches[static_cast<std::size_t>(a_clientId)];
+                const auto index = static_cast<std::size_t>(a_index);
+                if (index >= cache.size()) {
+                    return nullptr;
+                }
+                handle = cache[index];
+            }
+
+            auto actor = handle.get();
+            return actor ? actor.get() : nullptr;
+        }
+
         std::int32_t ClassifySSSWhoringActor(
             RE::StaticFunctionTag*,
             RE::Actor* a_actor)
         {
-            return ClassifySSSWhoringActorImpl(a_actor);
+            return ClassifySSSWhoringActorDetailed(a_actor).aliasIndex;
         }
 
         RE::Actor* FindSSSWhoringActor(
@@ -360,15 +483,18 @@ namespace JM::RoadEncounters
                 }
 
                 ++tested;
-                const auto aliasIndex = ClassifySSSWhoringActorImpl(actor);
-                if (aliasIndex >= 0) {
+                const auto classification =
+                    ClassifySSSWhoringActorDetailed(actor);
+                if (classification.aliasIndex >= 0) {
                     if (g_sssLogger) {
                         g_sssLogger->info(
                             "acquisition selected actor={} form=0x{:08X} "
-                            "alias={} tested={} radius={:.0f}",
+                            "alias={} mode={} reason={} tested={} radius={:.0f}",
                             actor->GetName(),
                             actor->GetFormID(),
-                            aliasIndex,
+                            classification.aliasIndex,
+                            classification.mode,
+                            classification.reason,
                             tested,
                             a_radius);
                     }
@@ -440,6 +566,8 @@ namespace JM::RoadEncounters
             a_vm->RegisterFunction("IsAvailable", kScriptName, IsAvailable);
             a_vm->RegisterFunction("LogDiagnostic", kScriptName, LogDiagnostic);
             a_vm->RegisterFunction("GetNearbyActors", kScriptName, GetNearbyActors);
+            a_vm->RegisterFunction("ScanNearbyActors", kScriptName, ScanNearbyActors);
+            a_vm->RegisterFunction("GetScannedActor", kScriptName, GetScannedActor);
             a_vm->RegisterFunction(
                 "ClassifySSSWhoringActor",
                 kScriptName,
