@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "SSSEligibilityPolicy.h"
 
 namespace JM::RoadEncounters
 {
@@ -59,6 +60,42 @@ namespace JM::RoadEncounters
             const char* mode{ "none" };
             const char* reason{ "unknown" };
         };
+
+        bool IsSSSHumanoidCandidate(RE::Actor* a_actor)
+        {
+            if (!a_actor) {
+                return false;
+            }
+
+            auto* race = a_actor->GetRace();
+            if (!race) {
+                return false;
+            }
+
+            // SSS_Whoring is human/humanoid social dialogue.  Some creature
+            // mods give their actors dialogue capability and non-hostile AI;
+            // that must never be sufficient to turn a creature into a generic
+            // SSS client.  Gate on race taxonomy before faction/dialogue rules.
+            static auto* actorTypeNPC =
+                RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeNPC");
+            static auto* actorTypeCreature =
+                RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeCreature");
+            static auto* actorTypeAnimal =
+                RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeAnimal");
+
+            if (!actorTypeNPC) {
+                return false;  // fail closed if the authoritative NPC tag is unavailable
+            }
+
+            const bool hasNPC = race->HasKeyword(actorTypeNPC);
+            const bool hasCreature =
+                actorTypeCreature && race->HasKeyword(actorTypeCreature);
+            const bool hasAnimal =
+                actorTypeAnimal && race->HasKeyword(actorTypeAnimal);
+
+            return Eligibility::IsHumanoidSSSCandidateRace(
+                hasNPC, hasCreature, hasAnimal);
+        }
 
         float DistanceSquared(const RE::NiPoint3& a_lhs, const RE::NiPoint3& a_rhs)
         {
@@ -164,7 +201,7 @@ namespace JM::RoadEncounters
             auto* player = RE::PlayerCharacter::GetSingleton();
             if (!player || !a_actor || a_actor == player ||
                 a_actor->IsDead() || a_actor->IsDisabled() ||
-                !a_actor->Is3DLoaded()) {
+                !a_actor->Is3DLoaded() || !IsSSSHumanoidCandidate(a_actor)) {
                 return -1;
             }
 
@@ -215,6 +252,14 @@ namespace JM::RoadEncounters
                 a_actor->IsDead() || a_actor->IsDisabled() ||
                 !a_actor->Is3DLoaded()) {
                 return { -1, "none", "invalid" };
+            }
+
+            // Hard species boundary: SSS_Whoring is for humanoid NPC races.
+            // Talking creature mods can otherwise satisfy the generic-client
+            // fallback when they are peaceful, which is exactly how a Skaven
+            // using the Riekling creature race entered alias 0.
+            if (!IsSSSHumanoidCandidate(a_actor)) {
+                return { -1, "fallback", "non-humanoid-race" };
             }
 
             // Acquisition classification is deliberately explicit and cheap.
@@ -471,6 +516,7 @@ namespace JM::RoadEncounters
 
             std::int32_t tested = 0;
             std::int32_t rejectedInvalid = 0;
+            std::int32_t rejectedSpecies = 0;
             std::int32_t rejectedChild = 0;
             std::int32_t rejectedTeammate = 0;
             std::int32_t rejectedCombat = 0;
@@ -511,6 +557,8 @@ namespace JM::RoadEncounters
                 const std::string_view reason = classification.reason;
                 if (reason == "invalid") {
                     ++rejectedInvalid;
+                } else if (reason == "non-humanoid-race") {
+                    ++rejectedSpecies;
                 } else if (reason == "child") {
                     ++rejectedChild;
                 } else if (reason == "teammate") {
@@ -549,11 +597,12 @@ namespace JM::RoadEncounters
             if (g_sssLogger && (scan % 10) == 0) {
                 g_sssLogger->info(
                     "acquisition scan #{} found no usable SSS actor "
-                    "(tested={}, invalid={}, child={}, teammate={}, combat={}, "
-                    "hostile={}, cannotTalk={}, radius={:.0f})",
+                    "(tested={}, invalid={}, species={}, child={}, teammate={}, "
+                    "combat={}, hostile={}, cannotTalk={}, radius={:.0f})",
                     scan,
                     tested,
                     rejectedInvalid,
+                    rejectedSpecies,
                     rejectedChild,
                     rejectedTeammate,
                     rejectedCombat,
@@ -576,7 +625,7 @@ namespace JM::RoadEncounters
             RE::StaticFunctionTag*,
             RE::Actor* a_actor)
         {
-            if (!a_actor) {
+            if (!a_actor || !IsSSSHumanoidCandidate(a_actor)) {
                 return false;
             }
 
