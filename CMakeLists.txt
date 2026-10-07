@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
     JM_RoadEncounters
-    VERSION 0.2.0
+    VERSION 0.2.1
     DESCRIPTION "Native actor acquisition service for JM Road Encounters, JM Elite Encounters, and JM SSS on Skyrim SE 1.5.97"
     LANGUAGES CXX)
 
