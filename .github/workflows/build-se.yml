@@ -84,6 +84,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $corePath = 'papyrus\JM_RE_Core.psc'
+          $coreText = Get-Content $corePath -Raw
+          $coreText = $coreText.Replace('Int JM_RE_ForceGreetCategory = CATEGORY_NONE', 'Int JM_RE_ForceGreetCategory = 0')
+          Set-Content -Path $corePath -Value $coreText -Encoding utf8
           New-Item -ItemType Directory -Force -Path build\papyrus | Out-Null
           .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus" -R -q
           foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_SSS_WhoringController.pex")) {
