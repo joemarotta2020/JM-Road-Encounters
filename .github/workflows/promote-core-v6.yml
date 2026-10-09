@@ -1,0 +1,38 @@
+name: Promote JM RE v6 Canonical Core
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/promote-core-v6.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Materialize and verify canonical Core
+        run: |
+          python .github/promote_jm_re_core_v6.py
+          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "680b371d26679dec67ffd1f38e54e30c602b0f4999004c0a46340bd9da4e88b5"
+      - name: Remove obsolete source substitution machinery
+        run: |
+          rm -f .github/apply_jm_re_forcegreet.py
+          rm -f .github/jm_re_payload_suffix.txt
+          rm -f .github/workflows/compile-jm-re-core.yml
+          rm -f .github/promote_jm_re_core_v6.py
+          rm -f .github/core_v6_payload_1.txt .github/core_v6_payload_1b.txt .github/core_v6_payload_2.txt .github/core_v6_payload_3.txt .github/core_v6_payload_4.txt
+          rm -f .github/workflows/promote-core-v6.yml
+      - name: Commit canonical source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Canonicalize audited JM RE v6 source"
+          git push origin HEAD:main
