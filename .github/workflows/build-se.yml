@@ -20,18 +20,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply exact JM RE v5 force-greet source
+      - name: Audit canonical JM RE source
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $helperPath = '.github\apply_jm_re_forcegreet.py'
-          $helperText = Get-Content $helperPath -Raw
-          $needle = 'data = zlib.decompress(base64.b64decode(PAYLOAD))'
-          $replacement = "PAYLOAD += Path('.github/jm_re_payload_suffix.txt').read_text().strip()`n$needle"
-          if (-not $helperText.Contains($needle)) { throw 'Could not locate payload decode line.' }
-          $helperText = $helperText.Replace($needle, $replacement)
-          Set-Content -Path $helperPath -Value $helperText -Encoding utf8
-          python $helperPath
+          python tools/audit_jm_re.py .
+          if ($LASTEXITCODE -ne 0) { throw "JM RE production invariant audit failed." }
 
       - name: Set up MSVC x64
         uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
@@ -103,7 +97,7 @@ jobs:
           Set-Content -Path $corePath -Value $coreText -Encoding utf8
           New-Item -ItemType Directory -Force -Path build\papyrus | Out-Null
           .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus" -R -q
-          foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_SSS_WhoringController.pex")) {
+          foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_RE_PLRPProvider.pex", "JM_RE_HydraProvider.pex", "JM_RE_ImmersiveWenchesProvider.pex", "JM_SSS_WhoringController.pex")) {
             if (-not (Test-Path "build\papyrus\$required")) { throw "Required Papyrus output missing: $required" }
           }
 
