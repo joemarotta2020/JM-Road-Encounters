@@ -1,0 +1,104 @@
+name: Compile Audited JM RE v6
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/compile-v6-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct accepted v5 Core and apply byte-verified v6 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $helper = '.github\apply_jm_re_forcegreet.py'
+          $text = Get-Content $helper -Raw
+          $needle = 'data = zlib.decompress(base64.b64decode(PAYLOAD))'
+          $replacement = "PAYLOAD += Path('.github/jm_re_payload_suffix.txt').read_text().strip()`n$needle"
+          if (-not $text.Contains($needle)) { throw 'v5 injector decode anchor missing' }
+          Set-Content -Path $helper -Value ($text.Replace($needle,$replacement)) -Encoding utf8
+          python $helper
+          $v5 = (Get-FileHash papyrus\JM_RE_Core.psc -Algorithm SHA256).Hash.ToLower()
+          if ($v5 -ne 'd7f56f6e5370ecafef100c3fea59b90196a4c26e8bfba4daf1e8fb651d7ca425') { throw "Unexpected v5 hash $v5" }
+          $patchHash = (Get-FileHash .github\core_v5_to_v6.patch -Algorithm SHA256).Hash.ToLower()
+          if ($patchHash -ne '13fc23b741d2ee86883a7ab84afec89ddc10afe76d7e0e629a0ccc580a964073') { throw "Unexpected patch hash $patchHash" }
+          git apply --check .github/core_v5_to_v6.patch
+          git apply .github/core_v5_to_v6.patch
+          $v6 = (Get-FileHash papyrus\JM_RE_Core.psc -Algorithm SHA256).Hash.ToLower()
+          if ($v6 -ne 'a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6') { throw "Unexpected v6 hash $v6" }
+          if ((Get-Content papyrus\JM_RE_Core.psc -Raw) -match 'Bool Int Function|EndIfEndFunction') { throw 'Known syntax regression present' }
+
+      - name: Prepare Caprica
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path .github\Caprica | Out-Null
+          gh release download 0.3.0a -R KrisV-777/Caprica --pattern "Caprica.zip" --dir .github --clobber
+          7z x .github\Caprica.zip "-o.github\Caprica" -y
+          New-Item -ItemType Directory -Force -Path .github\Papyrus | Out-Null
+          foreach ($sourceName in @('SRC','SRC_SKYUI','SRC_PAPUTIL')) {
+            $target = ".github\Papyrus\$sourceName"
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+            Push-Location $target
+            git init
+            git remote add origin https://github.com/IHateMyKite/PAPYRUS.git
+            git sparse-checkout set --no-cone $sourceName
+            git fetch --depth=1 origin main
+            git checkout main
+            Remove-Item .git -Recurse -Force
+            Pop-Location
+          }
+          $flagsTemp = '.github\Papyrus\flags-temp'
+          New-Item -ItemType Directory -Force -Path $flagsTemp | Out-Null
+          Push-Location $flagsTemp
+          git init
+          git remote add origin https://github.com/Rukan/Grimy-Skyrim-Papyrus-Source.git
+          git sparse-checkout set --no-cone TESV_Papyrus_Flags.flg
+          git fetch --depth=1 origin master
+          git checkout master
+          Copy-Item TESV_Papyrus_Flags.flg ..\SRC\TESV_Papyrus_Flags.flg
+          Pop-Location
+
+      - name: Compile complete JM RE Papyrus set
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Caprica compile-only normalization; repository source remains unchanged.
+          $core = Get-Content papyrus\JM_RE_Core.psc -Raw
+          $core = $core.Replace('Int JM_RE_ForceGreetCategory = CATEGORY_NONE','Int JM_RE_ForceGreetCategory = 0')
+          Set-Content papyrus\JM_RE_Core.psc -Value $core -Encoding utf8
+          New-Item -ItemType Directory -Force -Path build\papyrus | Out-Null
+          .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus" -R
+          foreach ($required in @('JM_RE_Core.pex','JM_RE_Native.pex','JM_RE_PLRPProvider.pex','JM_RE_HydraProvider.pex','JM_RE_ImmersiveWenchesProvider.pex')) {
+            if (-not (Test-Path "build\papyrus\$required")) { throw "Missing required output $required" }
+            Get-FileHash "build\papyrus\$required" -Algorithm SHA256
+          }
+
+      - name: Stage audited artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact\Scripts | Out-Null
+          New-Item -ItemType Directory -Force -Path artifact\Source\Scripts | Out-Null
+          foreach ($name in @('JM_RE_Core','JM_RE_Native','JM_RE_PLRPProvider','JM_RE_HydraProvider','JM_RE_ImmersiveWenchesProvider')) {
+            Copy-Item "build\papyrus\$name.pex" artifact\Scripts\
+            Copy-Item "papyrus\$name.psc" artifact\Source\Scripts\
+          }
+          'Core audited source SHA256: a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6' | Set-Content artifact\BUILD_INFO.txt
+          'Target: Skyrim SE 1.5.97' | Add-Content artifact\BUILD_INFO.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JM-RE-v6-audited-papyrus
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
