@@ -62,6 +62,11 @@ Faction Function GetAdventurerFaction() Global
 	Return Game.GetFormFromFile(0x00013BE8, GetPluginName()) as Faction
 EndFunction
 
+Faction Function GetVanillaVigilantFaction() Global
+	; Skyrim.esm Vigilant of Stendarr faction.
+	Return Game.GetFormFromFile(0x000B3292, "Skyrim.esm") as Faction
+EndFunction
+
 Bool Function BaseMatches(Actor akActor, Int aiLocalFormID) Global
 	ActorBase wantedBase
 	ActorBase directBase
@@ -146,6 +151,18 @@ Int Function GetAdventurerRole(Actor akActor) Global
 EndFunction
 
 Bool Function IsVigilant(Actor akActor) Global
+	If akActor == None || akActor.IsDead() || akActor.IsDisabled()
+		Return False
+	EndIf
+
+	; Primary structural classifier: any actor in the standard Vigilant faction.
+	Faction vigilantFaction = GetVanillaVigilantFaction()
+	If vigilantFaction != None && akActor.IsInFaction(vigilantFaction)
+		Return True
+	EndIf
+
+	; Compatibility fallback for PLRP records that may not retain faction membership
+	; through templates/overrides.
 	If BaseMatches(akActor, 0x0000BDCF)
 		Return True
 	ElseIf BaseMatches(akActor, 0x0000BDD2)
