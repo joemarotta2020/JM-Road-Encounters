@@ -97,6 +97,14 @@ namespace JM::RoadEncounters
                 hasNPC, hasCreature, hasAnimal);
         }
 
+        bool IsSSSBiologicalFemaleCandidate(RE::Actor* a_actor)
+        {
+            auto* base = a_actor ? a_actor->GetActorBase() : nullptr;
+            const int baseSex = base ? static_cast<int>(base->GetSex()) : -1;
+            return Eligibility::IsBiologicalFemaleSSSCandidate(
+                base != nullptr, baseSex);
+        }
+
         float DistanceSquared(const RE::NiPoint3& a_lhs, const RE::NiPoint3& a_rhs)
         {
             const float dx = a_lhs.x - a_rhs.x;
@@ -201,7 +209,8 @@ namespace JM::RoadEncounters
             auto* player = RE::PlayerCharacter::GetSingleton();
             if (!player || !a_actor || a_actor == player ||
                 a_actor->IsDead() || a_actor->IsDisabled() ||
-                !a_actor->Is3DLoaded() || !IsSSSHumanoidCandidate(a_actor)) {
+                !a_actor->Is3DLoaded() || !IsSSSHumanoidCandidate(a_actor) ||
+                !IsSSSBiologicalFemaleCandidate(a_actor)) {
                 return -1;
             }
 
@@ -260,6 +269,9 @@ namespace JM::RoadEncounters
             // using the Riekling creature race entered alias 0.
             if (!IsSSSHumanoidCandidate(a_actor)) {
                 return { -1, "fallback", "non-humanoid-race" };
+            }
+            if (!IsSSSBiologicalFemaleCandidate(a_actor)) {
+                return { -1, "fallback", "biological-male-or-unknown" };
             }
 
             // Acquisition classification is deliberately explicit and cheap.
@@ -517,6 +529,7 @@ namespace JM::RoadEncounters
             std::int32_t tested = 0;
             std::int32_t rejectedInvalid = 0;
             std::int32_t rejectedSpecies = 0;
+            std::int32_t rejectedBiologicalSex = 0;
             std::int32_t rejectedChild = 0;
             std::int32_t rejectedTeammate = 0;
             std::int32_t rejectedCombat = 0;
@@ -559,6 +572,8 @@ namespace JM::RoadEncounters
                     ++rejectedInvalid;
                 } else if (reason == "non-humanoid-race") {
                     ++rejectedSpecies;
+                } else if (reason == "biological-male-or-unknown") {
+                    ++rejectedBiologicalSex;
                 } else if (reason == "child") {
                     ++rejectedChild;
                 } else if (reason == "teammate") {
@@ -597,12 +612,13 @@ namespace JM::RoadEncounters
             if (g_sssLogger && (scan % 10) == 0) {
                 g_sssLogger->info(
                     "acquisition scan #{} found no usable SSS actor "
-                    "(tested={}, invalid={}, species={}, child={}, teammate={}, "
+                    "(tested={}, invalid={}, species={}, biologicalSex={}, child={}, teammate={}, "
                     "combat={}, hostile={}, cannotTalk={}, radius={:.0f})",
                     scan,
                     tested,
                     rejectedInvalid,
                     rejectedSpecies,
+                    rejectedBiologicalSex,
                     rejectedChild,
                     rejectedTeammate,
                     rejectedCombat,
@@ -625,7 +641,8 @@ namespace JM::RoadEncounters
             RE::StaticFunctionTag*,
             RE::Actor* a_actor)
         {
-            if (!a_actor || !IsSSSHumanoidCandidate(a_actor)) {
+            if (!a_actor || !IsSSSHumanoidCandidate(a_actor) ||
+                !IsSSSBiologicalFemaleCandidate(a_actor)) {
                 return false;
             }
 
