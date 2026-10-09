@@ -79,7 +79,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path build\papyrus | Out-Null
-          .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus/JM_RE_Core.psc" -q
+          .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus" -R -q
           if (-not (Test-Path "build\papyrus\JM_RE_Core.pex")) { throw "JM_RE_Core.pex was not produced." }
           Get-FileHash build\papyrus\JM_RE_Core.pex -Algorithm SHA256
 
