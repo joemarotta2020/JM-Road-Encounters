@@ -16,10 +16,33 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Materialize and verify canonical Core
+
+      - name: Reconstruct exact accepted v5 baseline
         run: |
-          python .github/promote_jm_re_core_v6.py
-          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "680b371d26679dec67ffd1f38e54e30c602b0f4999004c0a46340bd9da4e88b5"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/apply_jm_re_forcegreet.py')
+          s=p.read_text()
+          needle='data = zlib.decompress(base64.b64decode(PAYLOAD))'
+          repl="PAYLOAD += Path('.github/jm_re_payload_suffix.txt').read_text().strip()\n"+needle
+          if needle not in s:
+              raise SystemExit('v5 injector decode anchor missing')
+          p.write_text(s.replace(needle,repl))
+          PY
+          python .github/apply_jm_re_forcegreet.py
+          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "d7f56f6e5370ecafef100c3fea59b90196a4c26e8bfba4daf1e8fb651d7ca425"
+
+      - name: Apply and verify audited v6 patch
+        run: |
+          git apply --check .github/core_v5_to_v6.patch
+          git apply .github/core_v5_to_v6.patch
+          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6"
+          python tools/audit_jm_re.py .
+          grep -q '^Int Function GetEncounterSpeakerPriority' papyrus/JM_RE_Core.psc
+          grep -q '^Bool Function EvaluateNativeCandidatesIndexed' papyrus/JM_RE_Core.psc
+          ! grep -q 'Bool Int Function' papyrus/JM_RE_Core.psc
+          ! grep -q 'EndIfEndFunction' papyrus/JM_RE_Core.psc
+
       - name: Remove obsolete source substitution machinery
         run: |
           rm -f .github/apply_jm_re_forcegreet.py
@@ -27,7 +50,9 @@ jobs:
           rm -f .github/workflows/compile-jm-re-core.yml
           rm -f .github/promote_jm_re_core_v6.py
           rm -f .github/core_v6_payload_1.txt .github/core_v6_payload_1b.txt .github/core_v6_payload_2.txt .github/core_v6_payload_3.txt .github/core_v6_payload_4.txt
+          rm -f .github/core_v5_to_v6.patch
           rm -f .github/workflows/promote-core-v6.yml
+
       - name: Commit canonical source
         run: |
           git config user.name "github-actions[bot]"
