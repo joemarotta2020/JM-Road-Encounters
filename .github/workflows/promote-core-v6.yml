@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/promote-core-v6.yml'
+      - '.github/core_v5_to_v6.patch'
 
 permissions:
   contents: write
@@ -34,6 +35,7 @@ jobs:
 
       - name: Apply and verify audited v6 patch
         run: |
+          test "$(sha256sum .github/core_v5_to_v6.patch | awk '{print $1}')" = "13fc23b741d2ee86883a7ab84afec89ddc10afe76d7e0e629a0ccc580a964073"
           git apply --check .github/core_v5_to_v6.patch
           git apply .github/core_v5_to_v6.patch
           test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6"
