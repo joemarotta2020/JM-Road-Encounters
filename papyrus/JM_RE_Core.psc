@@ -26,11 +26,12 @@ The failed Hello/idle records remain inert for existing-save safety but no longe
 ; ===========================================================================
 
 Bool DebugMode = True
-Bool DebugNotifications = False
+Bool DebugNotifications = True
 
 ; One native high-process actor enumeration per active scan.
 Float ScanRadius = 3500.0
 Int NativeScanMaxActors = 32
+Int NativeScanClientId = 1 ; isolated indexed-scan slot; avoids native Actor[] marshaling
 
 ; No actor search occurs during the quiet window after a successful encounter.
 Float QuietHours = 8.0
@@ -86,7 +87,7 @@ Int MagicianServiceCost = 50
 Int BountyHunterDemand = 75
 Int HydraRoadFee = 100
 
-; Observer eligibility stays in logs only.
+; Observer eligibility also governs lightweight passive road-contact flavor.
 Float EligibilityRadius = 1000.0
 Float EligibilityCooldownHours = 1.0
 
@@ -106,16 +107,16 @@ Float HydraCaravanCooldownHours = 12.0
 Float HydraSacredBandCooldownHours = 12.0
 Float ImmersiveWenchCooldownHours = 12.0
 
-Float RogueOpportunityRadius = 350.0
-Float RefugeeOpportunityRadius = 350.0
-Float PilgrimOpportunityRadius = 350.0
-Float VigilantOpportunityRadius = 350.0
-Float MerchantOpportunityRadius = 350.0
-Float MagicianOpportunityRadius = 350.0
-Float BountyHunterOpportunityRadius = 350.0
-Float HydraOpportunityRadius = 350.0
-Float HydraSacredBandOpportunityRadius = 350.0
-Float ImmersiveWenchOpportunityRadius = 350.0
+Float RogueOpportunityRadius = 650.0
+Float RefugeeOpportunityRadius = 700.0
+Float PilgrimOpportunityRadius = 550.0
+Float VigilantOpportunityRadius = 550.0
+Float MerchantOpportunityRadius = 500.0
+Float MagicianOpportunityRadius = 650.0
+Float BountyHunterOpportunityRadius = 450.0
+Float HydraOpportunityRadius = 500.0
+Float HydraSacredBandOpportunityRadius = 500.0
+Float ImmersiveWenchOpportunityRadius = 500.0
 
 Float RogueOpportunityChance = 100.0
 Float RefugeeOpportunityChance = 100.0
@@ -159,6 +160,13 @@ Int CATEGORY_BOUNTY_HUNTER = 7
 Int CATEGORY_HYDRA_CARAVAN = 8
 Int CATEGORY_HYDRA_SACRED_BAND = 9
 Int CATEGORY_IMMERSIVE_WENCH = 10
+; v6 categories append only; never renumber existing serialized category IDs.
+Int CATEGORY_ASSASSIN = 11
+Int CATEGORY_KNIGHT = 12
+Int CATEGORY_MERCENARY = 13
+Int CATEGORY_FAITH = 14
+Int CATEGORY_ADVENTURER = 15
+Int CATEGORY_HYDRA_SLAVER = 16
 
 ; ===========================================================================
 ; RUNTIME
@@ -212,6 +220,12 @@ Float NextBountyHunterRollDay = 0.0
 Float NextHydraCaravanRollDay = 0.0
 Float NextHydraSacredBandRollDay = 0.0
 Float NextImmersiveWenchRollDay = 0.0
+Float NextAssassinRollDay = 0.0
+Float NextKnightRollDay = 0.0
+Float NextMercenaryRollDay = 0.0
+Float NextFaithRollDay = 0.0
+Float NextAdventurerRollDay = 0.0
+Float NextHydraSlaverRollDay = 0.0
 
 Bool HydraProviderLoaded = False
 
@@ -267,7 +281,7 @@ Float LastEligibleHydraSlaverDay = 0.0
 Bool JM_RE_ForceGreetPending = False
 Bool JM_RE_ForceGreetOpened = False
 Actor JM_RE_ForceGreetActor
-Int JM_RE_ForceGreetCategory = CATEGORY_NONE
+Int JM_RE_ForceGreetCategory = 0
 Float JM_RE_ForceGreetDistance = 0.0
 Float JM_RE_ForceGreetStartedReal = 0.0
 Float JM_RE_ForceGreetTimeoutSeconds = 12.0
@@ -414,12 +428,126 @@ Function MigrateCadenceState()
 			Debug.Trace("[JM_RE][CADENCE] MIGRATE v3 pressureStartDay=" + PressureStartDay + " hasSuccess=" + HasSuccessfulEncounter + " pressureHours=" + GetHoursSinceSuccessfulEncounter())
 		EndIf
 	EndIf
+
+	; v4 repairs production settings that were serialized by older JM RE builds.
+	; Source initializers do not overwrite existing-save values, so explicitly
+	; restore the accepted native-scanner encounter configuration once.
+	If CadenceStateVersion < 4
+		GovernorEnabled = True
+		LiveRogueEnabled = True
+		LiveRefugeeEnabled = True
+		LivePilgrimEnabled = True
+		LiveVigilantEnabled = True
+		LiveMerchantEnabled = True
+		LiveMagicianEnabled = True
+		LiveBountyHunterEnabled = True
+		LiveHydraCaravanEnabled = True
+		LiveHydraSacredBandEnabled = True
+		LiveImmersiveWenchEnabled = True
+
+		RogueOpportunityRadius = 650.0
+		RefugeeOpportunityRadius = 700.0
+		PilgrimOpportunityRadius = 550.0
+		VigilantOpportunityRadius = 550.0
+		MerchantOpportunityRadius = 500.0
+		MagicianOpportunityRadius = 650.0
+		BountyHunterOpportunityRadius = 450.0
+		HydraOpportunityRadius = 500.0
+		HydraSacredBandOpportunityRadius = 500.0
+		ImmersiveWenchOpportunityRadius = 500.0
+
+		RogueOpportunityChance = 100.0
+		RefugeeOpportunityChance = 100.0
+		PilgrimOpportunityChance = 100.0
+		VigilantOpportunityChance = 100.0
+		MerchantOpportunityChance = 100.0
+		MagicianOpportunityChance = 100.0
+		BountyHunterOpportunityChance = 100.0
+		HydraOpportunityChance = 100.0
+		HydraSacredBandOpportunityChance = 100.0
+		ImmersiveWenchOpportunityChance = 100.0
+
+		; Clear stale per-category/global roll gates so the corrected configuration
+		; is immediately testable on the existing save. This does not fabricate
+		; a successful encounter timestamp.
+		GlobalNextEncounterDay = 0.0
+		NextRogueRollDay = 0.0
+		NextRefugeeRollDay = 0.0
+		NextPilgrimRollDay = 0.0
+		NextVigilantRollDay = 0.0
+		NextMerchantRollDay = 0.0
+		NextMagicianRollDay = 0.0
+		NextBountyHunterRollDay = 0.0
+		NextHydraCaravanRollDay = 0.0
+		NextHydraSacredBandRollDay = 0.0
+		NextImmersiveWenchRollDay = 0.0
+
+		CadenceStateVersion = 4
+		If DebugMode
+			Debug.Trace("[JM_RE][MIGRATE] v4 production state restored. governor=" + GovernorEnabled + " pilgrimRadius=" + (PilgrimOpportunityRadius as Int) + " hydraRadius=" + (HydraOpportunityRadius as Int) + " hydraEnabled=" + LiveHydraCaravanEnabled)
+		EndIf
+	EndIf
+
+	; v5 locks first-action semantics. A save with no proven successful action must
+	; never be blocked by stale serialized clocks from an older build.
+	If CadenceStateVersion < 5
+		If !HasSuccessfulEncounter
+			PressureStartDay = 0.0
+			GlobalNextEncounterDay = 0.0
+			NextRogueRollDay = 0.0
+			NextRefugeeRollDay = 0.0
+			NextPilgrimRollDay = 0.0
+			NextVigilantRollDay = 0.0
+			NextMerchantRollDay = 0.0
+			NextMagicianRollDay = 0.0
+			NextBountyHunterRollDay = 0.0
+			NextHydraCaravanRollDay = 0.0
+			NextHydraSacredBandRollDay = 0.0
+			NextImmersiveWenchRollDay = 0.0
+		EndIf
+		CadenceStateVersion = 5
+		If DebugMode
+			If !HasSuccessfulEncounter
+			Debug.Trace("[JM_RE][MIGRATE] v5 transactional cadence. hasSuccess=False firstActionGuaranteed=True")
+		Else
+			Debug.Trace("[JM_RE][MIGRATE] v5 transactional cadence. hasSuccess=True firstActionGuaranteed=False")
+		EndIf
+		EndIf
+	EndIf
+	; v6 activates every structurally supported road population without renumbering existing IDs.
+	If CadenceStateVersion < 6
+		NextAssassinRollDay = 0.0
+		NextKnightRollDay = 0.0
+		NextMercenaryRollDay = 0.0
+		NextFaithRollDay = 0.0
+		NextAdventurerRollDay = 0.0
+		NextHydraSlaverRollDay = 0.0
+		If !HasSuccessfulEncounter
+			GlobalNextEncounterDay = 0.0
+		EndIf
+		CadenceStateVersion = 6
+		If DebugMode
+			Debug.Trace("[JM_RE][MIGRATE] v6 full-population activation. categories=16 firstAction=" + (!HasSuccessfulEncounter))
+		EndIf
+	EndIf
+
+EndFunction
+
+Function TraceRuntimeConfiguration()
+	If !DebugMode
+		Return
+	EndIf
+
+	Debug.Trace("[JM_RE][CONFIG] governor=" + GovernorEnabled + " enabled rogue=" + LiveRogueEnabled + " refugee=" + LiveRefugeeEnabled + " pilgrim=" + LivePilgrimEnabled + " vigilant=" + LiveVigilantEnabled + " merchant=" + LiveMerchantEnabled + " magician=" + LiveMagicianEnabled + " bounty=" + LiveBountyHunterEnabled + " hydraCaravan=" + LiveHydraCaravanEnabled + " hydraSacred=" + LiveHydraSacredBandEnabled + " wench=" + LiveImmersiveWenchEnabled)
+	Debug.Trace("[JM_RE][CONFIG] radii rogue=" + (RogueOpportunityRadius as Int) + " refugee=" + (RefugeeOpportunityRadius as Int) + " pilgrim=" + (PilgrimOpportunityRadius as Int) + " vigilant=" + (VigilantOpportunityRadius as Int) + " merchant=" + (MerchantOpportunityRadius as Int) + " magician=" + (MagicianOpportunityRadius as Int) + " bounty=" + (BountyHunterOpportunityRadius as Int) + " hydra=" + (HydraOpportunityRadius as Int) + " hydraSacred=" + (HydraSacredBandOpportunityRadius as Int) + " wench=" + (ImmersiveWenchOpportunityRadius as Int))
+	Debug.Trace("[JM_RE][CONFIG] messages pilgrim=" + (PilgrimRequestMessage != None) + " refugee=" + (RefugeeRequestMessage != None) + " vigilant=" + (VigilantInspectionMessage != None) + " magician=" + (MagicianServiceMessage != None) + " bounty=" + (BountyHunterMessage != None) + " hydra=" + (HydraCaravanMessage != None))
 EndFunction
 
 Function NativeWakeScanner()
 	; Called by JM_RoadEncounters.dll after a save finishes loading.
 	; Always reconcile cadence even when NativeScannerInitialized was serialized True.
 	MigrateCadenceState()
+	TraceRuntimeConfiguration()
 
 	If !NativeScannerInitialized
 		InitializeNativeScanner(True)
@@ -462,17 +590,10 @@ EndFunction
 Float Function GetHoursSinceSuccessfulEncounter()
 	Float nowDay = Utility.GetCurrentGameTime()
 
+	; First-action invariant: no successful player-facing action means there is no
+	; success clock to wait on. Treat the first valid contact as fully eligible.
 	If !HasSuccessfulEncounter
-		If PressureStartDay <= 0.0 || PressureStartDay > nowDay
-			Return QuietHours
-		EndIf
-
-		Float pressureDays = nowDay - PressureStartDay
-		If pressureDays < 0.0
-			Return QuietHours
-		EndIf
-
-		Return pressureDays * 24.0
+		Return GuaranteedEncounterHours
 	EndIf
 
 	If LastSuccessfulEncounterDay <= 0.0
@@ -557,9 +678,22 @@ Function RunSearchPulse()
 		Debug.Trace("[JM_RE][CADENCE] pulse #" + SearchPulseCounter + " history=NONE scannerEligible=TRUE elapsedHours=" + elapsedHours + " dllAvailable=" + NativeDetectorAvailable)
 	EndIf
 
+	Bool nativeOpportunityHandled = False
+	Bool cellOpportunityHandled = False
+
 	If NativeDetectorAvailable
-		Actor[] nearby = JM_RE_Native.GetNearbyActors(PlayerRef, ScanRadius, NativeScanMaxActors)
-		EvaluateNativeCandidates(nearby, elapsedHours)
+		Int nearbyCount = JM_RE_Native.ScanNearbyActors(PlayerRef, ScanRadius, NativeScanMaxActors, NativeScanClientId)
+		nativeOpportunityHandled = EvaluateNativeCandidatesIndexed(nearbyCount, elapsedHours)
+		; The native scanner intentionally sees only high-process actors. PLRP/Hydra road actors
+		; are often loaded but below that process tier, which made the encounter core silently
+		; starve even while populated roads were visible. If the native snapshot produced no
+		; live opportunity, immediately run the bounded 8-sample fallback against loaded actors.
+		If !nativeOpportunityHandled
+			cellOpportunityHandled = RunCurrentCellSearch(elapsedHours)
+			If !cellOpportunityHandled
+				RunFallbackSearch(elapsedHours)
+			EndIf
+		EndIf
 	Else
 		RunFallbackSearch(elapsedHours)
 		nextInterval = FallbackScanIntervalSeconds
@@ -581,6 +715,12 @@ Float Function GetScanIntervalSeconds(Float afElapsedHours)
 EndFunction
 
 Float Function GetCadenceOpportunityChance(Float afElapsedHours)
+	; First valid encounter is guaranteed. Do not gate first action behind a clock
+	; that cannot exist until an action has actually succeeded.
+	If !HasSuccessfulEncounter
+		Return 100.0
+	EndIf
+
 	If afElapsedHours >= GuaranteedEncounterHours
 		Return 100.0
 	ElseIf afElapsedHours >= HighPressureHours
@@ -615,35 +755,241 @@ Float Function GetOpportunityRadiusForCategory(Int aiCategory)
 		Return HydraSacredBandOpportunityRadius
 	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
 		Return ImmersiveWenchOpportunityRadius
+	ElseIf aiCategory == CATEGORY_ASSASSIN
+		Return 650.0
+	ElseIf aiCategory == CATEGORY_KNIGHT || aiCategory == CATEGORY_MERCENARY || aiCategory == CATEGORY_FAITH || aiCategory == CATEGORY_ADVENTURER
+		Return 550.0
+	ElseIf aiCategory == CATEGORY_HYDRA_SLAVER
+		Return 500.0
 	EndIf
-
 	Return 0.0
 EndFunction
 
-Function EvaluateNativeCandidates(Actor[] akNearby, Float afElapsedHours)
-	NativeScanCounter += 1
+Bool Function IsPassiveHydraSlaver(Actor akActor)
+	; Observation only. This intentionally does NOT promote broad Hydra slavers
+	; into a live encounter category. Caravan and Sacred Band actors keep their
+	; dedicated live paths.
+	If !HydraProviderLoaded || akActor == None
+		Return False
+	EndIf
 
-	If akNearby == None || akNearby.Length <= 0
-		If DebugMode && (NativeScanCounter % 10) == 0
-			Debug.Trace("[JM_RE][SCAN] native scan: no nearby high-process actors. elapsedHours=" + (afElapsedHours as Int))
-		EndIf
+	Faction slaverFaction = JM_RE_HydraProvider.GetSlaverFaction()
+	If slaverFaction == None || !akActor.IsInFaction(slaverFaction)
+		Return False
+	EndIf
+
+	If JM_RE_HydraProvider.GetCaravanRole(akActor) != 0
+		Return False
+	EndIf
+
+	If JM_RE_HydraProvider.IsSacredBand(akActor)
+		Return False
+	EndIf
+
+	Return True
+EndFunction
+
+Function ObservePassiveRoadContact(Actor akActor, Int aiRole, Float afDistance, Float afNowDay)
+	; v6 invariant: any structurally recognized supported role must map to an action category.
+	If DebugMode && akActor != None && aiRole != ROLE_NONE && afDistance > 0.0 && afDistance <= EligibilityRadius
+		Debug.Trace("[JM_RE][AUDIT] classified role without encounter category role=" + aiRole + " actor=" + akActor + " distance=" + (afDistance as Int))
+	EndIf
+EndFunction
+
+Function TraceNativeContactDecision(Actor akActor, Int aiRole, Int aiCategory, Float afDistance, Float afAllowedRadius, Float afElapsedHours, Float afNowDay)
+	If !DebugMode || akActor == None || afDistance <= 0.0 || afDistance > EligibilityRadius
 		Return
 	EndIf
 
+	String reason = ""
+	If aiCategory == CATEGORY_NONE
+		If aiRole == ROLE_ADVENTURER && JM_RE_PLRPProvider.GetAdventurerRole(akActor) != 4
+			reason = "adventurer-non-rogue"
+		ElseIf IsPassiveHydraSlaver(akActor)
+			reason = "hydra-other-slaver"
+		Else
+			Return
+		EndIf
+	ElseIf !IsLiveCategoryConfigured(aiCategory)
+		reason = "category-disabled"
+	ElseIf afAllowedRadius <= 0.0
+		reason = "no-radius"
+	ElseIf afDistance > afAllowedRadius
+		reason = "outside-radius"
+	ElseIf IsCategoryCooldownBlocked(aiCategory, afNowDay)
+		reason = "cooldown"
+	ElseIf GetCadenceOpportunityChance(afElapsedHours) <= 0.0
+		reason = "cadence-zero"
+	Else
+		reason = "roll-ready"
+	EndIf
+
+	Debug.Trace("[JM_RE][CONTACT] actor=" + akActor + " role=" + aiRole + " category=" + GetCategoryLabel(aiCategory) + " distance=" + (afDistance as Int) + " radius=" + (afAllowedRadius as Int) + " elapsedHours=" + (afElapsedHours as Int) + " reason=" + reason)
+EndFunction
+
+Int Function GetEncounterSpeakerPriority(Int aiCategory, Actor akActor)
+	If akActor == None
+		Return 0
+	EndIf
+	If aiCategory == CATEGORY_MERCHANT
+		If MerchantFaction != None && akActor.IsInFaction(MerchantFaction)
+			Return 100
+		ElseIf MerchantBodyguardFaction != None && akActor.IsInFaction(MerchantBodyguardFaction)
+			Return 50
+		EndIf
+	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
+		Int hydraRole = JM_RE_HydraProvider.GetCaravanRole(akActor)
+		If hydraRole == 1
+			Return 100
+		ElseIf hydraRole == 2
+			Return 60
+		ElseIf hydraRole == 4
+			Return 40
+		ElseIf hydraRole == 3
+			Return 20
+		EndIf
+	EndIf
+	Return 75
+EndFunction
+
+Bool Function IsJM_RE_ForceGreetPackageActive()
+	If JM_RE_ForceGreetActor == None || JM_RE_ForceGreetCategory == CATEGORY_NONE
+		Return False
+	EndIf
+	Package expectedPackage = GetJM_RE_ForceGreetPackage(JM_RE_ForceGreetCategory)
+	If expectedPackage == None
+		Return False
+	EndIf
+	Return JM_RE_ForceGreetActor.GetCurrentPackage() == expectedPackage
+EndFunction
+
+Bool Function EvaluateNativeCandidatesIndexed(Int aiNearbyCount, Float afElapsedHours)
+	NativeScanCounter += 1
+	If aiNearbyCount <= 0
+		Return False
+	EndIf
 	Float nowDay = Utility.GetCurrentGameTime()
 	Int cooldownCategory = CATEGORY_NONE
+	Actor bestActor = None
+	Int bestCategory = CATEGORY_NONE
+	Float bestDistance = 0.0
+	Int bestPriority = -999
 	Int i = 0
-	While i < akNearby.Length
-		Actor candidate = akNearby[i]
+	While i < aiNearbyCount
+		Actor candidate = JM_RE_Native.GetScannedActor(NativeScanClientId, i)
 		If IsUsableCandidate(candidate) && !candidate.IsInCombat()
+			Int role = GetRoleCode(candidate)
 			Int category = GetEncounterCategory(candidate)
-			If category != CATEGORY_NONE
-				Float distance = candidate.GetDistance(PlayerRef)
+			Float distance = candidate.GetDistance(PlayerRef)
+			Float allowedRadius = GetOpportunityRadiusForCategory(category)
+			TraceNativeContactDecision(candidate, role, category, distance, allowedRadius, afElapsedHours, nowDay)
+			If category == CATEGORY_NONE
+				ObservePassiveRoadContact(candidate, role, distance, nowDay)
+			ElseIf allowedRadius > 0.0 && distance > 0.0 && distance <= allowedRadius
+				If CanCommitCategory(category, nowDay)
+					Int priorityValue = GetEncounterSpeakerPriority(category, candidate)
+					If bestActor == None || priorityValue > bestPriority || (priorityValue == bestPriority && distance < bestDistance)
+						bestActor = candidate
+						bestCategory = category
+						bestDistance = distance
+						bestPriority = priorityValue
+					EndIf
+				ElseIf cooldownCategory == CATEGORY_NONE && IsCategoryCooldownBlocked(category, nowDay)
+					cooldownCategory = category
+				EndIf
+			EndIf
+		EndIf
+		i += 1
+	EndWhile
+	If bestActor != None
+		If DebugMode
+			Debug.Trace("[JM_RE][SCAN] selected speaker category=" + GetCategoryLabel(bestCategory) + " actor=" + bestActor + " priority=" + bestPriority + " distance=" + (bestDistance as Int))
+		EndIf
+		Return RollCadenceOpportunity(bestCategory, bestActor, bestDistance, afElapsedHours, nowDay, "native-indexed")
+	EndIf
+	If cooldownCategory != CATEGORY_NONE
+		NotifyScannerRejection(cooldownCategory, True)
+	ElseIf DebugMode && (NativeScanCounter % 10) == 0
+		Debug.Trace("[JM_RE][SCAN] native scan: actors=" + aiNearbyCount + " but no eligible encounter actor. elapsedHours=" + (afElapsedHours as Int) + " -> bounded fallback")
+	EndIf
+	Return False
+EndFunction
+
+Bool Function RunCurrentCellSearch(Float afElapsedHours)
+	If PlayerRef == None
+		Return False
+	EndIf
+	Cell currentCell = PlayerRef.GetParentCell()
+	If currentCell == None
+		Return False
+	EndIf
+	Float nowDay = Utility.GetCurrentGameTime()
+	Actor bestActor = None
+	Int bestCategory = CATEGORY_NONE
+	Float bestDistance = 0.0
+	Int bestPriority = -999
+	Int count = currentCell.GetNumRefs(62)
+	If count > 64
+		count = 64
+	EndIf
+	Int i = 0
+	While i < count
+		Actor candidate = currentCell.GetNthRef(i, 62) as Actor
+		If IsUsableCandidate(candidate) && !candidate.IsInCombat()
+			Int role = GetRoleCode(candidate)
+			Int category = GetEncounterCategory(candidate)
+			Float distance = candidate.GetDistance(PlayerRef)
+			If category == CATEGORY_NONE
+				ObservePassiveRoadContact(candidate, role, distance, nowDay)
+			Else
+				Float allowedRadius = GetOpportunityRadiusForCategory(category)
+				If allowedRadius > 0.0 && distance > 0.0 && distance <= allowedRadius && CanCommitCategory(category, nowDay)
+					Int priorityValue = GetEncounterSpeakerPriority(category, candidate)
+					If bestActor == None || priorityValue > bestPriority || (priorityValue == bestPriority && distance < bestDistance)
+						bestActor = candidate
+						bestCategory = category
+						bestDistance = distance
+						bestPriority = priorityValue
+					EndIf
+				EndIf
+			EndIf
+		EndIf
+		i += 1
+	EndWhile
+	If bestActor != None
+		Debug.Trace("[JM_RE][SCAN] current-cell selected speaker category=" + GetCategoryLabel(bestCategory) + " actor=" + bestActor + " priority=" + bestPriority + " distance=" + (bestDistance as Int))
+		Return RollCadenceOpportunity(bestCategory, bestActor, bestDistance, afElapsedHours, nowDay, "current-cell")
+	EndIf
+	Return False
+EndFunction
+
+Function RunFallbackSearch(Float afElapsedHours)
+	Float nowDay = Utility.GetCurrentGameTime()
+	Actor bestActor = None
+	Int bestCategory = CATEGORY_NONE
+	Float bestDistance = 0.0
+	Int bestPriority = -999
+	Int cooldownCategory = CATEGORY_NONE
+	Int i = 0
+	While i < FallbackScanSamples
+		Actor candidate = Game.FindRandomActorFromRef(PlayerRef, FallbackScanRadius)
+		If IsUsableCandidate(candidate) && !candidate.IsInCombat()
+			Int role = GetRoleCode(candidate)
+			Int category = GetEncounterCategory(candidate)
+			Float distance = candidate.GetDistance(PlayerRef)
+			If category == CATEGORY_NONE
+				ObservePassiveRoadContact(candidate, role, distance, nowDay)
+			Else
 				Float allowedRadius = GetOpportunityRadiusForCategory(category)
 				If allowedRadius > 0.0 && distance > 0.0 && distance <= allowedRadius
 					If CanCommitCategory(category, nowDay)
-						RollCadenceOpportunity(category, candidate, distance, afElapsedHours, nowDay, "native")
-						Return
+						Int priorityValue = GetEncounterSpeakerPriority(category, candidate)
+						If bestActor == None || priorityValue > bestPriority || (priorityValue == bestPriority && distance < bestDistance)
+							bestActor = candidate
+							bestCategory = category
+							bestDistance = distance
+							bestPriority = priorityValue
+						EndIf
 					ElseIf cooldownCategory == CATEGORY_NONE && IsCategoryCooldownBlocked(category, nowDay)
 						cooldownCategory = category
 					EndIf
@@ -652,53 +998,6 @@ Function EvaluateNativeCandidates(Actor[] akNearby, Float afElapsedHours)
 		EndIf
 		i += 1
 	EndWhile
-
-	; Do not let a cooldown-blocked contact hide another eligible encounter.
-	; We only speak after the full nearest-first array has been considered.
-	If cooldownCategory != CATEGORY_NONE
-		NotifyScannerRejection(cooldownCategory, True)
-	EndIf
-
-	If DebugMode && (NativeScanCounter % 10) == 0
-		Debug.Trace("[JM_RE][SCAN] native scan: actors=" + akNearby.Length + " but no eligible encounter actor. elapsedHours=" + (afElapsedHours as Int))
-	EndIf
-EndFunction
-
-Function RunFallbackSearch(Float afElapsedHours)
-	Float nowDay = Utility.GetCurrentGameTime()
-	Actor bestActor
-	Int bestCategory = CATEGORY_NONE
-	Float bestDistance = 0.0
-	Int cooldownCategory = CATEGORY_NONE
-	Float cooldownDistance = 0.0
-	Int i = 0
-
-	While i < FallbackScanSamples
-		Actor candidate = Game.FindRandomActorFromRef(PlayerRef, FallbackScanRadius)
-		If IsUsableCandidate(candidate) && !candidate.IsInCombat()
-			Int category = GetEncounterCategory(candidate)
-			If category != CATEGORY_NONE
-				Float distance = candidate.GetDistance(PlayerRef)
-				Float allowedRadius = GetOpportunityRadiusForCategory(category)
-				If allowedRadius > 0.0 && distance > 0.0 && distance <= allowedRadius
-					If CanCommitCategory(category, nowDay)
-						If bestActor == None || distance < bestDistance
-							bestActor = candidate
-							bestCategory = category
-							bestDistance = distance
-						EndIf
-					ElseIf IsCategoryCooldownBlocked(category, nowDay)
-						If cooldownCategory == CATEGORY_NONE || distance < cooldownDistance
-							cooldownCategory = category
-							cooldownDistance = distance
-						EndIf
-					EndIf
-				EndIf
-			EndIf
-		EndIf
-		i += 1
-	EndWhile
-
 	If bestActor != None
 		RollCadenceOpportunity(bestCategory, bestActor, bestDistance, afElapsedHours, nowDay, "fallback")
 	ElseIf cooldownCategory != CATEGORY_NONE
@@ -708,25 +1007,23 @@ Function RunFallbackSearch(Float afElapsedHours)
 	EndIf
 EndFunction
 
-Function RollCadenceOpportunity(Int aiCategory, Actor akActor, Float afDistance, Float afElapsedHours, Float afNowDay, String asSource)
+Bool Function RollCadenceOpportunity(Int aiCategory, Actor akActor, Float afDistance, Float afElapsedHours, Float afNowDay, String asSource)
+	If DebugNotifications
+		Debug.Notification("JM RE OBS: " + GetCategoryLabel(aiCategory) + " nearby (" + (afDistance as Int) + ")")
+	EndIf
 	Float chance = GetCadenceOpportunityChance(afElapsedHours)
 	If chance <= 0.0
-		Return
+		Return False
 	EndIf
-
 	Float roll = Utility.RandomFloat(0.0, 100.0)
 	If roll <= chance
-		If DebugMode
-			Debug.Trace("[JM_RE][SCAN] TRIGGER source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " distance=" + (afDistance as Int) + " elapsedHours=" + (afElapsedHours as Int) + " chance=" + (chance as Int) + " roll=" + (roll as Int))
-		EndIf
-		CommitEncounter(aiCategory, akActor, afDistance, afNowDay, asSource)
-	Else
-		SetFailedRollCooldown(aiCategory, afNowDay)
-		NotifyScannerRejection(aiCategory, False)
-		If DebugMode
-			Debug.Trace("[JM_RE][SCAN] roll failed source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " distance=" + (afDistance as Int) + " elapsedHours=" + (afElapsedHours as Int) + " chance=" + (chance as Int) + " roll=" + (roll as Int) + " retryHours=" + (FailedOpportunityCooldownHours as Int))
-		EndIf
+		Debug.Trace("[JM_RE][SCAN] TRIGGER source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " distance=" + (afDistance as Int) + " elapsedHours=" + (afElapsedHours as Int) + " chance=" + (chance as Int) + " roll=" + (roll as Int))
+		Return CommitEncounter(aiCategory, akActor, afDistance, afNowDay, asSource)
 	EndIf
+	SetFailedRollCooldown(aiCategory, afNowDay)
+	NotifyScannerRejection(aiCategory, False)
+	Debug.Trace("[JM_RE][SCAN] roll failed source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " retryHours=" + (FailedOpportunityCooldownHours as Int))
+	Return False
 EndFunction
 
 Function HandleHelloCandidate(Actor akSpeaker)
@@ -743,13 +1040,24 @@ Int Function GetEncounterCategory(Actor akActor)
 		Return CATEGORY_NONE
 	EndIf
 
-	; Soft dependency: only IW-owned actors explicitly named as Maid Wenches qualify.
 	If JM_RE_ImmersiveWenchesProvider.IsMaidWench(akActor)
 		Return CATEGORY_IMMERSIVE_WENCH
 	EndIf
 
-	Int role = GetRoleCode(akActor)
+	; Hydra identities are independent of PLRP and are structural/faction based.
+	If HydraProviderLoaded
+		If JM_RE_HydraProvider.IsSacredBand(akActor)
+			Return CATEGORY_HYDRA_SACRED_BAND
+		EndIf
+		If JM_RE_HydraProvider.GetCaravanRole(akActor) > 0
+			Return CATEGORY_HYDRA_CARAVAN
+		EndIf
+		If JM_RE_HydraProvider.IsOtherSlaver(akActor)
+			Return CATEGORY_HYDRA_SLAVER
+		EndIf
+	EndIf
 
+	Int role = GetRoleCode(akActor)
 	If role == ROLE_BOUNTY_HUNTER
 		Return CATEGORY_BOUNTY_HUNTER
 	ElseIf role == ROLE_WANDERING_MAGICIAN
@@ -758,22 +1066,23 @@ Int Function GetEncounterCategory(Actor akActor)
 		Return CATEGORY_PILGRIM
 	ElseIf role == ROLE_REFUGEE
 		Return CATEGORY_REFUGEE
-	ElseIf role == ROLE_MERCHANT
+	ElseIf role == ROLE_MERCHANT || role == ROLE_MERCHANT_BODYGUARD
 		Return CATEGORY_MERCHANT
 	ElseIf role == ROLE_VIGILANT
 		Return CATEGORY_VIGILANT
+	ElseIf role == ROLE_ASSASSIN
+		Return CATEGORY_ASSASSIN
+	ElseIf role == ROLE_WANDERING_KNIGHT
+		Return CATEGORY_KNIGHT
+	ElseIf role == ROLE_MERCENARY_WIZARD || role == ROLE_MERCENARY_WARRIOR || role == ROLE_MERCENARY_MISSILE
+		Return CATEGORY_MERCENARY
+	ElseIf role == ROLE_KNIGHT_OF_FAITH
+		Return CATEGORY_FAITH
 	ElseIf role == ROLE_ADVENTURER
 		If JM_RE_PLRPProvider.GetAdventurerRole(akActor) == 4
 			Return CATEGORY_ROGUE
 		EndIf
-	EndIf
-
-	If HydraProviderLoaded
-		If JM_RE_HydraProvider.GetCaravanRole(akActor) == 1
-			Return CATEGORY_HYDRA_CARAVAN
-		ElseIf JM_RE_HydraProvider.IsSacredBand(akActor)
-			Return CATEGORY_HYDRA_SACRED_BAND
-		EndIf
+		Return CATEGORY_ADVENTURER
 	EndIf
 
 	Return CATEGORY_NONE
@@ -783,29 +1092,17 @@ Bool Function IsLiveCategoryConfigured(Int aiCategory)
 	If !GovernorEnabled || aiCategory == CATEGORY_NONE
 		Return False
 	EndIf
-
-	If aiCategory == CATEGORY_ROGUE
-		Return LiveRogueEnabled
-	ElseIf aiCategory == CATEGORY_REFUGEE
-		Return LiveRefugeeEnabled && RefugeeRequestMessage != None
-	ElseIf aiCategory == CATEGORY_PILGRIM
-		Return LivePilgrimEnabled && PilgrimRequestMessage != None
+	; Eligibility is structural. Missing optional follow-up Message records must not
+	; suppress the JM-owned force-greet action itself.
+	If aiCategory == CATEGORY_ROGUE || aiCategory == CATEGORY_REFUGEE || aiCategory == CATEGORY_PILGRIM || aiCategory == CATEGORY_MERCHANT || aiCategory == CATEGORY_MAGICIAN || aiCategory == CATEGORY_BOUNTY_HUNTER || aiCategory == CATEGORY_ASSASSIN || aiCategory == CATEGORY_KNIGHT || aiCategory == CATEGORY_MERCENARY || aiCategory == CATEGORY_FAITH || aiCategory == CATEGORY_ADVENTURER
+		Return ProviderLoaded
 	ElseIf aiCategory == CATEGORY_VIGILANT
-		Return LiveVigilantEnabled && VigilantInspectionMessage != None
-	ElseIf aiCategory == CATEGORY_MERCHANT
-		Return LiveMerchantEnabled
-	ElseIf aiCategory == CATEGORY_MAGICIAN
-		Return LiveMagicianEnabled && MagicianServiceMessage != None
-	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER
-		Return LiveBountyHunterEnabled && BountyHunterMessage != None
-	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
-		Return LiveHydraCaravanEnabled && HydraCaravanMessage != None
-	ElseIf aiCategory == CATEGORY_HYDRA_SACRED_BAND
-		Return LiveHydraSacredBandEnabled
+		Return True
+	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN || aiCategory == CATEGORY_HYDRA_SACRED_BAND || aiCategory == CATEGORY_HYDRA_SLAVER
+		Return HydraProviderLoaded
 	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
-		Return LiveImmersiveWenchEnabled && JM_RE_ImmersiveWenchesProvider.IsInstalled()
+		Return JM_RE_ImmersiveWenchesProvider.IsInstalled()
 	EndIf
-
 	Return False
 EndFunction
 
@@ -830,13 +1127,30 @@ Float Function GetCategoryNextRollDay(Int aiCategory)
 		Return NextHydraSacredBandRollDay
 	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
 		Return NextImmersiveWenchRollDay
+	ElseIf aiCategory == CATEGORY_ASSASSIN
+		Return NextAssassinRollDay
+	ElseIf aiCategory == CATEGORY_KNIGHT
+		Return NextKnightRollDay
+	ElseIf aiCategory == CATEGORY_MERCENARY
+		Return NextMercenaryRollDay
+	ElseIf aiCategory == CATEGORY_FAITH
+		Return NextFaithRollDay
+	ElseIf aiCategory == CATEGORY_ADVENTURER
+		Return NextAdventurerRollDay
+	ElseIf aiCategory == CATEGORY_HYDRA_SLAVER
+		Return NextHydraSlaverRollDay
 	EndIf
-
 	Return 0.0
 EndFunction
 
 Bool Function IsCategoryCooldownBlocked(Int aiCategory, Float afNowDay)
 	If !IsLiveCategoryConfigured(aiCategory)
+		Return False
+	EndIf
+
+	; First-action invariant: stale serialized cooldowns can never block the first
+	; real player-facing encounter on an existing save.
+	If !HasSuccessfulEncounter
 		Return False
 	EndIf
 
@@ -991,7 +1305,6 @@ EndFunction
 
 Function SetFailedRollCooldown(Int aiCategory, Float afNowDay)
 	Float nextDay = afNowDay + (FailedOpportunityCooldownHours / 24.0)
-
 	If aiCategory == CATEGORY_ROGUE
 		NextRogueRollDay = nextDay
 	ElseIf aiCategory == CATEGORY_REFUGEE
@@ -1012,12 +1325,23 @@ Function SetFailedRollCooldown(Int aiCategory, Float afNowDay)
 		NextHydraSacredBandRollDay = nextDay
 	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
 		NextImmersiveWenchRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_ASSASSIN
+		NextAssassinRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_KNIGHT
+		NextKnightRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_MERCENARY
+		NextMercenaryRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_FAITH
+		NextFaithRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_ADVENTURER
+		NextAdventurerRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_HYDRA_SLAVER
+		NextHydraSlaverRollDay = nextDay
 	EndIf
 EndFunction
 
 Function SetCategorySuccessCooldown(Int aiCategory, Float afNowDay, Float afHours)
 	Float nextDay = afNowDay + (afHours / 24.0)
-
 	If aiCategory == CATEGORY_ROGUE
 		NextRogueRollDay = nextDay
 	ElseIf aiCategory == CATEGORY_REFUGEE
@@ -1038,6 +1362,18 @@ Function SetCategorySuccessCooldown(Int aiCategory, Float afNowDay, Float afHour
 		NextHydraSacredBandRollDay = nextDay
 	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
 		NextImmersiveWenchRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_ASSASSIN
+		NextAssassinRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_KNIGHT
+		NextKnightRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_MERCENARY
+		NextMercenaryRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_FAITH
+		NextFaithRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_ADVENTURER
+		NextAdventurerRollDay = nextDay
+	ElseIf aiCategory == CATEGORY_HYDRA_SLAVER
+		NextHydraSlaverRollDay = nextDay
 	EndIf
 EndFunction
 
@@ -1067,63 +1403,61 @@ Float Function GetOpportunityChance(Int aiCategory)
 	Return 0.0
 EndFunction
 
-Function CommitEncounter(Int aiCategory, Actor akActor, Float afDistance, Float afNowDay, String asSource)
+Bool Function CanStartDirectEncounter(Int aiCategory, Actor akActor)
 	If akActor == None || aiCategory == CATEGORY_NONE
-		Return
+		Return False
 	EndIf
+	; The JM-owned force-greet is the guaranteed encounter action. Optional message,
+	; barter, gold, or other follow-up prerequisites are resolved only after dialogue.
+	Return IsLiveCategoryConfigured(aiCategory)
+EndFunction
 
-	; Sacred Band / Maid Wench do not consume cadence or their category cooldown
-	; until the actual force-greet dialogue opens.  A failed approach is free to retry.
-	If aiCategory == CATEGORY_HYDRA_SACRED_BAND || aiCategory == CATEGORY_IMMERSIVE_WENCH
-		If BeginJM_RE_ForceGreet(akActor, aiCategory, afDistance)
-			If DebugMode
-				Debug.Trace("[JM_RE][FORCEGREET] RESERVED source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " distance=" + (afDistance as Int))
-			EndIf
-		EndIf
-		Return
-	EndIf
-
-	; Only a real player-facing encounter resets cadence.
+Function CommitSuccessfulAction(Int aiCategory, Float afNowDay, Actor akActor, String asSource)
 	LastSuccessfulEncounterDay = afNowDay
 	HasSuccessfulEncounter = True
 	GlobalNextEncounterDay = afNowDay + (GlobalEncounterCooldownHours / 24.0)
 	SetCategorySuccessCooldown(aiCategory, afNowDay, GetCategorySuccessCooldownHours(aiCategory))
 
 	If DebugMode
-		Debug.Trace("[JM_RE][DIRECTOR] COMMIT source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " distance=" + (afDistance as Int))
+		Debug.Trace("[JM_RE][CADENCE] ACTION COMMITTED source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " successDay=" + afNowDay)
 	EndIf
+EndFunction
 
-	If aiCategory == CATEGORY_ROGUE
-		ResolveRogueEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_REFUGEE
-		ResolveRefugeeEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_PILGRIM
-		ResolvePilgrimEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_VIGILANT
-		ResolveVigilantEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_MERCHANT
-		ResolveMerchantEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_MAGICIAN
-		ResolveMagicianEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER
-		ResolveBountyHunterEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
-		ResolveHydraCaravanEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_HYDRA_SACRED_BAND
-		ResolveHydraSacredBandEncounter(akActor, afDistance)
-	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
-		ResolveImmersiveWenchEncounter(akActor, afDistance)
+Bool Function CommitEncounter(Int aiCategory, Actor akActor, Float afDistance, Float afNowDay, String asSource)
+	If akActor == None || aiCategory == CATEGORY_NONE
+		Return False
 	EndIf
+	If !CanStartDirectEncounter(aiCategory, akActor)
+		Debug.Trace("[JM_RE][DIRECTOR] ACTION ABORTED source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " reason=prerequisite")
+		Return False
+	EndIf
+	If BeginJM_RE_ForceGreet(akActor, aiCategory, afDistance)
+		Debug.Trace("[JM_RE][FORCEGREET] RESERVED source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " distance=" + (afDistance as Int))
+		Return True
+	EndIf
+	Debug.Trace("[JM_RE][DIRECTOR] ACTION ABORTED source=" + asSource + " category=" + GetCategoryLabel(aiCategory) + " actor=" + akActor + " reason=force-greet-unavailable")
+	Return False
+EndFunction
+
+Package Function GetJM_RE_ForceGreetPackage(Int aiCategory)
+	; Authoritative 2026-10-05 plugin local FormIDs:
+	; 0x81D = JM_RE_SacredBandForceGreet (reused as generic JM RE force-greet)
+	; 0x81E = JM_RE_WenchForceGreet (kept for its dedicated Wench line)
+	If aiCategory == CATEGORY_IMMERSIVE_WENCH
+		Return Game.GetFormFromFile(0x0000081E, "JM_RoadEncounters.esp") as Package
+	EndIf
+	Return Game.GetFormFromFile(0x0000081D, "JM_RoadEncounters.esp") as Package
 EndFunction
 
 Bool Function BeginJM_RE_ForceGreet(Actor akActor, Int aiCategory, Float afDistance)
 	If akActor == None || JM_RE_ForceGreetPending
 		Return False
 	EndIf
-	Quest q = Game.GetFormFromFile(0x00000815, "JM_RoadEncounters.esp") as Quest
-	Package pkg = Game.GetFormFromFile(0x00000816, "JM_RoadEncounters.esp") as Package
+	; Authoritative plugin local FormID 0x818 = JM_RE_ForceGreetQuest.
+	Quest q = Game.GetFormFromFile(0x00000818, "JM_RoadEncounters.esp") as Quest
+	Package pkg = GetJM_RE_ForceGreetPackage(aiCategory)
 	If q == None || pkg == None
-		Debug.Trace("[JM_RE][FORCEGREET] missing quest/package category=" + aiCategory)
+		Debug.Trace("[JM_RE][FORCEGREET] missing quest/package category=" + aiCategory + " quest=" + q + " package=" + pkg)
 		Return False
 	EndIf
 	If q.IsRunning()
@@ -1174,37 +1508,94 @@ EndFunction
 
 Function JM_RE_CommitForceGreetSuccess()
 	Float nowDay = Utility.GetCurrentGameTime()
-	LastSuccessfulEncounterDay = nowDay
-	HasSuccessfulEncounter = True
-	GlobalNextEncounterDay = nowDay + (GlobalEncounterCooldownHours / 24.0)
-	SetCategorySuccessCooldown(JM_RE_ForceGreetCategory, nowDay, GetCategorySuccessCooldownHours(JM_RE_ForceGreetCategory))
+	CommitSuccessfulAction(JM_RE_ForceGreetCategory, nowDay, JM_RE_ForceGreetActor, "force-greet-dialogue")
 	Debug.Trace("[JM_RE][FORCEGREET] DIALOGUE OPENED; cooldown committed category=" + GetCategoryLabel(JM_RE_ForceGreetCategory) + " actor=" + JM_RE_ForceGreetActor)
 EndFunction
 
 Event OnMenuOpen(String menuName)
-	If menuName == "Dialogue Menu" && JM_RE_ForceGreetPending && !JM_RE_ForceGreetOpened
-		JM_RE_ForceGreetOpened = True
-		JM_RE_CommitForceGreetSuccess()
+	If menuName != "Dialogue Menu" || !JM_RE_ForceGreetPending || JM_RE_ForceGreetOpened
+		Return
 	EndIf
+	; Do not let unrelated dialogue consume JM RE cadence. The pending actor must still be
+	; executing the exact JM-owned force-greet package for this category.
+	If !IsJM_RE_ForceGreetPackageActive()
+		Debug.Trace("[JM_RE][FORCEGREET] dialogue menu ignored: pending JM package is not active; no success cooldown consumed")
+		Return
+	EndIf
+	JM_RE_ForceGreetOpened = True
+	JM_RE_CommitForceGreetSuccess()
 EndEvent
 
 Event OnMenuClose(String menuName)
 	If menuName != "Dialogue Menu" || !JM_RE_ForceGreetPending || !JM_RE_ForceGreetOpened
 		Return
 	EndIf
-	Debug.Trace("[JM_RE][FORCEGREET] dialogue closed category=" + GetCategoryLabel(JM_RE_ForceGreetCategory))
+
+	Actor actionActor = JM_RE_ForceGreetActor
+	Int actionCategory = JM_RE_ForceGreetCategory
+	Float actionDistance = JM_RE_ForceGreetDistance
+	Debug.Trace("[JM_RE][FORCEGREET] dialogue closed category=" + GetCategoryLabel(actionCategory) + " actor=" + actionActor)
+
+	; Release the dialogue package before opening barter/message/hostile follow-up UI.
 	ClearJM_RE_ForceGreet(True)
+	ResolveJM_RE_ForceGreetAction(actionCategory, actionActor, actionDistance)
 	RegisterForSingleUpdate(2.0)
 EndEvent
+
+Function ResolveJM_RE_ForceGreetAction(Int aiCategory, Actor akActor, Float afDistance)
+	If akActor == None
+		Return
+	EndIf
+	If aiCategory == CATEGORY_ROGUE
+		ResolveRogueEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_REFUGEE
+		ResolveRefugeeEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_PILGRIM
+		ResolvePilgrimEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_VIGILANT
+		ResolveVigilantEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_MERCHANT
+		ResolveMerchantEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_MAGICIAN
+		ResolveMagicianEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_BOUNTY_HUNTER
+		ResolveBountyHunterEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_HYDRA_CARAVAN
+		ResolveHydraCaravanEncounter(akActor, afDistance)
+	ElseIf aiCategory == CATEGORY_ASSASSIN
+		Debug.Notification("The assassin's greeting turns into an attack.")
+		akActor.StartCombat(PlayerRef)
+		Debug.Trace("[JM_RE][ASSASSIN] hostile action actor=" + akActor)
+	ElseIf aiCategory == CATEGORY_HYDRA_SLAVER
+		Debug.Notification("The slaver stops you and makes their presence unmistakable.")
+		Debug.Trace("[JM_RE][HYDRA] roaming slaver action actor=" + akActor)
+	ElseIf aiCategory == CATEGORY_KNIGHT
+		Debug.Notification("The wandering knight stops you for a roadside exchange.")
+		Debug.Trace("[JM_RE][KNIGHT] road action actor=" + akActor)
+	ElseIf aiCategory == CATEGORY_MERCENARY
+		Debug.Notification("The mercenary stops you to size you up.")
+		Debug.Trace("[JM_RE][MERCENARY] road action actor=" + akActor)
+	ElseIf aiCategory == CATEGORY_FAITH
+		Debug.Notification("The knight of the faith stops you on the road.")
+		Debug.Trace("[JM_RE][FAITH] road action actor=" + akActor)
+	ElseIf aiCategory == CATEGORY_ADVENTURER
+		Debug.Notification("The adventurer stops you for a roadside exchange.")
+		Debug.Trace("[JM_RE][ADVENTURER] road action actor=" + akActor)
+	ElseIf aiCategory == CATEGORY_HYDRA_SACRED_BAND
+		Debug.Trace("[JM_RE][SACRED] force-greet action completed actor=" + akActor)
+	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
+		Debug.Trace("[JM_RE][WENCH] force-greet action completed actor=" + akActor)
+	EndIf
+EndFunction
 
 Function ClearJM_RE_ForceGreet(Bool abDialogueOpened)
 	UnregisterForMenu("Dialogue Menu")
 	If JM_RE_ForceGreetActor != None
-		ActorUtil.RemovePackageOverride(JM_RE_ForceGreetActor, Game.GetFormFromFile(0x00000816, "JM_RoadEncounters.esp") as Package)
+		ActorUtil.RemovePackageOverride(JM_RE_ForceGreetActor, GetJM_RE_ForceGreetPackage(JM_RE_ForceGreetCategory))
 		JM_RE_ForceGreetActor.ClearLookAt()
 		JM_RE_ForceGreetActor.EvaluatePackage()
 	EndIf
-	Quest q = Game.GetFormFromFile(0x00000815, "JM_RoadEncounters.esp") as Quest
+	Quest q = Game.GetFormFromFile(0x00000818, "JM_RoadEncounters.esp") as Quest
 	If q != None && q.IsRunning()
 		q.Stop()
 	EndIf
@@ -1217,17 +1608,18 @@ Function ClearJM_RE_ForceGreet(Bool abDialogueOpened)
 EndFunction
 
 Function ResolveHydraSacredBandEncounter(Actor akSacredBand, Float afDistance)
-	If akSacredBand == None
-		Return
+	; Compatibility entry point retained for existing callers. Route through the
+	; same owned force-greet pipeline; cadence still commits only on Dialogue Menu open.
+	If akSacredBand != None
+		BeginJM_RE_ForceGreet(akSacredBand, CATEGORY_HYDRA_SACRED_BAND, afDistance)
 	EndIf
-	BeginJM_RE_ForceGreet(akSacredBand, CATEGORY_HYDRA_SACRED_BAND, afDistance)
 EndFunction
 
 Function ResolveImmersiveWenchEncounter(Actor akWench, Float afDistance)
-	If akWench == None || !JM_RE_ImmersiveWenchesProvider.IsMaidWench(akWench)
-		Return
+	; Compatibility entry point retained for existing callers.
+	If akWench != None && JM_RE_ImmersiveWenchesProvider.IsMaidWench(akWench)
+		BeginJM_RE_ForceGreet(akWench, CATEGORY_IMMERSIVE_WENCH, afDistance)
 	EndIf
-	BeginJM_RE_ForceGreet(akWench, CATEGORY_IMMERSIVE_WENCH, afDistance)
 EndFunction
 
 Function ResolveRogueEncounter(Actor akRogue, Float afDistance)
@@ -1476,23 +1868,12 @@ Bool Function CanObserve()
 		Return False
 	EndIf
 
-	If !ProviderLoaded
+	; Providers are independent. PLRP absence must not disable Hydra or Immersive Wenches.
+	If !ProviderLoaded && !HydraProviderLoaded && !JM_RE_ImmersiveWenchesProvider.IsInstalled()
 		Return False
 	EndIf
 
-	If PlayerRef.IsDead()
-		Return False
-	EndIf
-
-	If PlayerRef.IsInInterior()
-		Return False
-	EndIf
-
-	If PlayerRef.IsInCombat()
-		Return False
-	EndIf
-
-	If PlayerRef.GetSleepState() != 0
+	If PlayerRef.IsDead() || PlayerRef.IsInInterior() || PlayerRef.IsInCombat() || PlayerRef.GetSleepState() != 0
 		Return False
 	EndIf
 
@@ -1754,26 +2135,16 @@ Float Function MinDistance(Float afCurrent, Float afCandidate)
 EndFunction
 
 Bool Function IsUsableCandidate(Actor akActor)
-	If akActor == None
+	If akActor == None || akActor == PlayerRef
 		Return False
 	EndIf
-
-	If akActor == PlayerRef
+	If akActor.IsDead() || akActor.IsDisabled() || !akActor.Is3DLoaded()
 		Return False
 	EndIf
-
-	If akActor.IsDead()
+	; Followers/teammates never independently trigger JM RE.
+	If akActor.IsPlayerTeammate()
 		Return False
 	EndIf
-
-	If akActor.IsDisabled()
-		Return False
-	EndIf
-
-	If !akActor.Is3DLoaded()
-		Return False
-	EndIf
-
 	Return True
 EndFunction
 
@@ -2111,7 +2482,6 @@ Float Function GetCategorySuccessCooldownHours(Int aiCategory)
 	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
 		Return ImmersiveWenchCooldownHours
 	EndIf
-
 	Return 12.0
 EndFunction
 
@@ -2136,8 +2506,19 @@ String Function GetCategoryLabel(Int aiCategory)
 		Return "Hydra Sacred Band"
 	ElseIf aiCategory == CATEGORY_IMMERSIVE_WENCH
 		Return "Immersive Wench"
+	ElseIf aiCategory == CATEGORY_ASSASSIN
+		Return "Assassin"
+	ElseIf aiCategory == CATEGORY_KNIGHT
+		Return "Wandering Knight"
+	ElseIf aiCategory == CATEGORY_MERCENARY
+		Return "Mercenary"
+	ElseIf aiCategory == CATEGORY_FAITH
+		Return "Knight of the Faith"
+	ElseIf aiCategory == CATEGORY_ADVENTURER
+		Return "Adventurer"
+	ElseIf aiCategory == CATEGORY_HYDRA_SLAVER
+		Return "Hydra Slaver"
 	EndIf
-
 	Return "None"
 EndFunction
 
@@ -2371,3 +2752,4 @@ Function ReportObservations(Int aiMerchant, Int aiBodyguard, Float afMerchantNea
 		MarkBroadcast(ROLE_WANDERING_MAGICIAN)
 	EndIf
 EndFunction
+
