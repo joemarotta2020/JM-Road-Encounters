@@ -1,4 +1,4 @@
-name: Compile JM RE Core PEX
+name: Compile Canonical JM RE Papyrus
 
 on:
   push:
@@ -10,32 +10,22 @@ permissions:
   contents: read
 
 jobs:
-  compile-core:
-    name: Compile JM_RE_Core for Skyrim SE 1.5.97
+  compile-papyrus:
+    name: Compile audited JM RE Papyrus for Skyrim SE 1.5.97
     runs-on: windows-2022
     steps:
-      - name: Checkout source
+      - name: Checkout canonical source
         uses: actions/checkout@v4
 
-      - name: Apply exact JM RE v5 force-greet source
+      - name: Audit canonical source
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $helperPath = '.github\apply_jm_re_forcegreet.py'
-          $helperText = Get-Content $helperPath -Raw
-          $needle = 'data = zlib.decompress(base64.b64decode(PAYLOAD))'
-          $replacement = "PAYLOAD += Path('.github/jm_re_payload_suffix.txt').read_text().strip()`n$needle"
-          if (-not $helperText.Contains($needle)) { throw 'Could not locate payload decode line.' }
-          $helperText = $helperText.Replace($needle, $replacement)
-          Set-Content -Path $helperPath -Value $helperText -Encoding utf8
-          python $helperPath
-
-      - name: Verify exact source hash
-        shell: pwsh
-        run: |
+          python tools/audit_jm_re.py .
+          if ($LASTEXITCODE -ne 0) { throw "JM RE production invariant audit failed." }
           $hash = (Get-FileHash papyrus\JM_RE_Core.psc -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne 'd7f56f6e5370ecafef100c3fea59b90196a4c26e8bfba4daf1e8fb651d7ca425') { throw "Unexpected JM_RE_Core.psc hash: $hash" }
-          Write-Host "Verified source SHA256=$hash"
+          if ($hash -ne '87b6148a13bfac1d40bb34f3965c5fe07be06caea70a41c17717c06ce753f5eb') { throw "Unexpected JM_RE_Core.psc hash: $hash" }
+          Write-Host "Verified canonical Core SHA256=$hash"
 
       - name: Prepare Caprica Papyrus toolchain
         shell: pwsh
@@ -74,29 +64,37 @@ jobs:
           Pop-Location
           Remove-Item $flagsTemp -Recurse -Force
 
-      - name: Compile JM RE Papyrus sources
+      - name: Compile canonical Papyrus tree
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $corePath = 'papyrus\JM_RE_Core.psc'
+          $coreText = Get-Content $corePath -Raw
+          $coreText = $coreText.Replace('Int JM_RE_ForceGreetCategory = CATEGORY_NONE', 'Int JM_RE_ForceGreetCategory = 0')
+          Set-Content -Path $corePath -Value $coreText -Encoding utf8
           New-Item -ItemType Directory -Force -Path build\papyrus | Out-Null
           .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus" -R -q
-          if (-not (Test-Path "build\papyrus\JM_RE_Core.pex")) { throw "JM_RE_Core.pex was not produced." }
-          Get-FileHash build\papyrus\JM_RE_Core.pex -Algorithm SHA256
+          foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_RE_PLRPProvider.pex", "JM_RE_HydraProvider.pex", "JM_RE_ImmersiveWenchesProvider.pex")) {
+            if (-not (Test-Path "build\papyrus\$required")) { throw "Required Papyrus output missing: $required" }
+            Get-FileHash "build\papyrus\$required" -Algorithm SHA256
+          }
 
-      - name: Stage PEX artifact
+      - name: Stage canonical PEX artifact
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifact\Scripts | Out-Null
           New-Item -ItemType Directory -Force -Path artifact\Source\Scripts | Out-Null
-          Copy-Item build\papyrus\JM_RE_Core.pex artifact\Scripts\JM_RE_Core.pex
-          Copy-Item papyrus\JM_RE_Core.psc artifact\Source\Scripts\JM_RE_Core.psc
-          "Source SHA256: d7f56f6e5370ecafef100c3fea59b90196a4c26e8bfba4daf1e8fb651d7ca425" | Set-Content artifact\BUILD_INFO.txt
+          foreach ($name in @("JM_RE_Core", "JM_RE_Native", "JM_RE_PLRPProvider", "JM_RE_HydraProvider", "JM_RE_ImmersiveWenchesProvider")) {
+            Copy-Item "build\papyrus\$name.pex" "artifact\Scripts\$name.pex"
+            Copy-Item "papyrus\$name.psc" "artifact\Source\Scripts\$name.psc"
+          }
+          "Canonical Core source SHA256: 87b6148a13bfac1d40bb34f3965c5fe07be06caea70a41c17717c06ce753f5eb" | Set-Content artifact\BUILD_INFO.txt
           "Target: Skyrim SE 1.5.97" | Add-Content artifact\BUILD_INFO.txt
 
-      - name: Upload JM RE Core artifact
+      - name: Upload canonical Papyrus artifact
         uses: actions/upload-artifact@v4
         with:
-          name: JM-RE-Core-ForceGreet-v5
+          name: JM-RE-Canonical-Papyrus-v6
           path: artifact/
           if-no-files-found: error
           retention-days: 30
