@@ -39,7 +39,6 @@ jobs:
           git apply --check .github/core_v5_to_v6.patch
           git apply .github/core_v5_to_v6.patch
           test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6"
-          python tools/audit_jm_re.py .
           grep -q '^Int Function GetEncounterSpeakerPriority' papyrus/JM_RE_Core.psc
           grep -q '^Bool Function EvaluateNativeCandidatesIndexed' papyrus/JM_RE_Core.psc
           ! grep -q 'Bool Int Function' papyrus/JM_RE_Core.psc
@@ -54,6 +53,11 @@ jobs:
           rm -f .github/core_v6_payload_1.txt .github/core_v6_payload_1b.txt .github/core_v6_payload_2.txt .github/core_v6_payload_3.txt .github/core_v6_payload_4.txt
           rm -f .github/core_v5_to_v6.patch
           rm -f .github/workflows/promote-core-v6.yml
+
+      - name: Audit final single-source tree
+        run: |
+          python tools/audit_jm_re.py .
+          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6"
 
       - name: Commit canonical source
         run: |
