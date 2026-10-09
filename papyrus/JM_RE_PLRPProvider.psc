@@ -1,6 +1,6 @@
 Scriptname JM_RE_PLRPProvider Hidden
 {PLRP SE v3.2 provider for JM Road Encounters.
-No hard plugin dependency. All forms are resolved at runtime.}
+No hard plugin dependency. Factions are primary structural classifiers; exact bases are fallback/subtype detail only.}
 
 String Function GetPluginName() Global
 	Return "Populated Lands Roads Paths Legendary.esp"
@@ -13,171 +13,89 @@ EndFunction
 Faction Function GetMerchantFaction() Global
 	Return Game.GetFormFromFile(0x0000EF7F, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetMerchantBodyguardFaction() Global
 	Return Game.GetFormFromFile(0x0001158C, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetAssassinFaction() Global
 	Return Game.GetFormFromFile(0x0000A815, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetBountyHunterFaction() Global
 	Return Game.GetFormFromFile(0x0000B859, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetWanderingMagicianFaction() Global
 	Return Game.GetFormFromFile(0x0000C34C, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetWanderingKnightFaction() Global
 	Return Game.GetFormFromFile(0x0000C358, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetMercenaryWizardFaction() Global
 	Return Game.GetFormFromFile(0x0000C375, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetMercenaryWarriorFaction() Global
 	Return Game.GetFormFromFile(0x0000C37F, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetMercenaryMissileFaction() Global
 	Return Game.GetFormFromFile(0x0000C394, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetKnightOfTheFaithFaction() Global
 	Return Game.GetFormFromFile(0x0000C90C, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetPilgrimFaction() Global
 	Return Game.GetFormFromFile(0x0000D941, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetRefugeeFaction() Global
 	Return Game.GetFormFromFile(0x000125E9, GetPluginName()) as Faction
 EndFunction
-
 Faction Function GetAdventurerFaction() Global
 	Return Game.GetFormFromFile(0x00013BE8, GetPluginName()) as Faction
 EndFunction
 
-Faction Function GetVanillaVigilantFaction() Global
-	; Skyrim.esm Vigilant of Stendarr faction.
-	Return Game.GetFormFromFile(0x000B3292, "Skyrim.esm") as Faction
-EndFunction
-
 Bool Function BaseMatches(Actor akActor, Int aiLocalFormID) Global
-	ActorBase wantedBase
-	ActorBase directBase
-	ActorBase leveledBase
-
 	If akActor == None
 		Return False
 	EndIf
-
-	wantedBase = Game.GetFormFromFile(aiLocalFormID, GetPluginName()) as ActorBase
+	ActorBase wantedBase = Game.GetFormFromFile(aiLocalFormID, GetPluginName()) as ActorBase
 	If wantedBase == None
 		Return False
 	EndIf
-
-	directBase = akActor.GetActorBase()
-	If directBase == wantedBase
-		Return True
-	EndIf
-
-	leveledBase = akActor.GetLeveledActorBase()
-	If leveledBase == wantedBase
-		Return True
-	EndIf
-
-	Return False
+	Return akActor.GetActorBase() == wantedBase || akActor.GetLeveledActorBase() == wantedBase
 EndFunction
 
 Int Function GetAdventurerRole(Actor akActor) Global
-	; 1 leader, 2 warrior, 3 archer, 4 rogue, 5 wizard, 6 solitary/mounted.
-
-	If BaseMatches(akActor, 0x00014198)
-		Return 1
-	ElseIf BaseMatches(akActor, 0x000141A4)
-		Return 1
-	ElseIf BaseMatches(akActor, 0x000141B8)
-		Return 1
+	; 1 leader, 2 warrior, 3 archer, 4 rogue, 5 wizard, 6 solitary/mounted, 7 generic/unknown adventurer.
+	If akActor == None
+		Return 0
 	EndIf
-
-	If BaseMatches(akActor, 0x000141B1)
+	Faction adv = GetAdventurerFaction()
+	If adv == None || !akActor.IsInFaction(adv)
+		Return 0
+	EndIf
+	If BaseMatches(akActor, 0x00014198) || BaseMatches(akActor, 0x000141A4) || BaseMatches(akActor, 0x000141B8)
+		Return 1
+	ElseIf BaseMatches(akActor, 0x000141B1)
 		Return 2
-	EndIf
-
-	If BaseMatches(akActor, 0x0001419E)
+	ElseIf BaseMatches(akActor, 0x0001419E) || BaseMatches(akActor, 0x000141BB)
 		Return 3
-	ElseIf BaseMatches(akActor, 0x000141BB)
-		Return 3
-	EndIf
-
-	If BaseMatches(akActor, 0x000141A0)
+	ElseIf BaseMatches(akActor, 0x000141A0) || BaseMatches(akActor, 0x000141B3) || BaseMatches(akActor, 0x000141BD)
 		Return 4
-	ElseIf BaseMatches(akActor, 0x000141B3)
-		Return 4
-	ElseIf BaseMatches(akActor, 0x000141BD)
-		Return 4
-	EndIf
-
-	If BaseMatches(akActor, 0x000141A2)
+	ElseIf BaseMatches(akActor, 0x000141A2) || BaseMatches(akActor, 0x000141B5) || BaseMatches(akActor, 0x000141BF)
 		Return 5
-	ElseIf BaseMatches(akActor, 0x000141B5)
-		Return 5
-	ElseIf BaseMatches(akActor, 0x000141BF)
-		Return 5
-	EndIf
-
-	If BaseMatches(akActor, 0x00014164)
-		Return 6
-	ElseIf BaseMatches(akActor, 0x00014165)
-		Return 6
-	ElseIf BaseMatches(akActor, 0x00014166)
-		Return 6
-	ElseIf BaseMatches(akActor, 0x00014167)
-		Return 6
-	ElseIf BaseMatches(akActor, 0x00013BE6)
-		Return 6
-	ElseIf BaseMatches(akActor, 0x00013BEE)
-		Return 6
-	ElseIf BaseMatches(akActor, 0x0001415F)
+	ElseIf BaseMatches(akActor, 0x00014164) || BaseMatches(akActor, 0x00014165) || BaseMatches(akActor, 0x00014166) || BaseMatches(akActor, 0x00014167) || BaseMatches(akActor, 0x00013BE6) || BaseMatches(akActor, 0x00013BEE) || BaseMatches(akActor, 0x0001415F)
 		Return 6
 	EndIf
-
-	Return 0
+	; Do not discard a faction-confirmed adventurer just because its base was not in the old audit.
+	Return 7
 EndFunction
 
 Bool Function IsVigilant(Actor akActor) Global
-	If akActor == None || akActor.IsDead() || akActor.IsDisabled()
+	If akActor == None
 		Return False
 	EndIf
-
-	; Primary structural classifier: any actor in the standard Vigilant faction.
-	Faction vigilantFaction = GetVanillaVigilantFaction()
+	; Primary structural identity: vanilla Vigilant of Stendarr faction.
+	Faction vigilantFaction = Game.GetFormFromFile(0x000B3292, "Skyrim.esm") as Faction
 	If vigilantFaction != None && akActor.IsInFaction(vigilantFaction)
 		Return True
 	EndIf
-
-	; Compatibility fallback for PLRP records that may not retain faction membership
-	; through templates/overrides.
-	If BaseMatches(akActor, 0x0000BDCF)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0000BDD2)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0000BDD3)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0000BDD6)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0000BDD7)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0000BDD9)
-		Return True
-	ElseIf BaseMatches(akActor, 0x0000BDDB)
-		Return True
-	EndIf
-
-	Return False
+	; Compatibility fallback for known PLRP bases whose faction may be altered by another plugin.
+	Return BaseMatches(akActor, 0x0000BDCF) || BaseMatches(akActor, 0x0000BDD2) || BaseMatches(akActor, 0x0000BDD3) || BaseMatches(akActor, 0x0000BDD6) || BaseMatches(akActor, 0x0000BDD7) || BaseMatches(akActor, 0x0000BDD9) || BaseMatches(akActor, 0x0000BDDB)
 EndFunction
