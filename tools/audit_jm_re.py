@@ -1,3 +1,4 @@
+# Production invariant audit; changing this comment intentionally triggers a canonical build.
 from pathlib import Path
 import sys,re
 root=Path(sys.argv[1]) if len(sys.argv)>1 else Path('.')
