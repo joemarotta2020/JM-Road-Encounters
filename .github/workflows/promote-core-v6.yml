@@ -1,3 +1,4 @@
+# Trigger audited canonical promotion
 name: Promote JM RE v6 Canonical Core
 
 on:
