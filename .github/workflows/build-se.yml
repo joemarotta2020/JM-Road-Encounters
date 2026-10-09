@@ -20,6 +20,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Apply exact JM RE v5 force-greet source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python .github\apply_jm_re_forcegreet.py
+
       - name: Set up MSVC x64
         uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
         with:
