@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/promote-core-v6.yml'
-      - '.github/core_v5_to_v6.patch'
 
 permissions:
   contents: write
@@ -18,27 +17,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct exact accepted v5 baseline
+      - name: Reconstruct and verify complete v6 Core
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('.github/apply_jm_re_forcegreet.py')
-          s=p.read_text()
-          needle='data = zlib.decompress(base64.b64decode(PAYLOAD))'
-          repl="PAYLOAD += Path('.github/jm_re_payload_suffix.txt').read_text().strip()\n"+needle
-          if needle not in s:
-              raise SystemExit('v5 injector decode anchor missing')
-          p.write_text(s.replace(needle,repl))
-          PY
-          python .github/apply_jm_re_forcegreet.py
-          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "d7f56f6e5370ecafef100c3fea59b90196a4c26e8bfba4daf1e8fb651d7ca425"
-
-      - name: Apply and verify audited v6 patch
-        run: |
-          echo "Patch SHA256=$(sha256sum .github/core_v5_to_v6.patch | awk '{print $1}')"
-          git apply --check .github/core_v5_to_v6.patch
-          git apply .github/core_v5_to_v6.patch
-          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6"
+          python .github/promote_jm_re_core_v6.py
+          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "680b371d26679dec67ffd1f38e54e30c602b0f4999004c0a46340bd9da4e88b5"
           grep -q '^Int Function GetEncounterSpeakerPriority' papyrus/JM_RE_Core.psc
           grep -q '^Bool Function EvaluateNativeCandidatesIndexed' papyrus/JM_RE_Core.psc
           ! grep -q 'Bool Int Function' papyrus/JM_RE_Core.psc
@@ -52,19 +34,23 @@ jobs:
           s=p.read_text()
           start=s.find('      - name: Apply exact JM RE v5 force-greet source\n')
           end=s.find('      - name: Set up MSVC x64\n', start)
-          if start < 0 or end < 0:
-              raise SystemExit('Could not locate obsolete source-substitution build step')
-          s=s[:start]+s[end:]
+          if start >= 0 and end >= 0:
+              s=s[:start]+s[end:]
           old='foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_SSS_WhoringController.pex"))'
           new='foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_RE_PLRPProvider.pex", "JM_RE_HydraProvider.pex", "JM_RE_ImmersiveWenchesProvider.pex", "JM_SSS_WhoringController.pex"))'
-          if old not in s:
-              raise SystemExit('Could not locate Papyrus required-output list')
-          p.write_text(s.replace(old,new))
+          if old in s:
+              s=s.replace(old,new)
+          p.write_text(s)
           PY
           ! grep -q 'apply_jm_re_forcegreet.py' .github/workflows/build-se.yml
           grep -q 'JM_RE_PLRPProvider.pex' .github/workflows/build-se.yml
           grep -q 'JM_RE_HydraProvider.pex' .github/workflows/build-se.yml
           grep -q 'JM_RE_ImmersiveWenchesProvider.pex' .github/workflows/build-se.yml
+
+      - name: Audit complete source tree
+        run: |
+          python tools/audit_jm_re.py .
+          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "680b371d26679dec67ffd1f38e54e30c602b0f4999004c0a46340bd9da4e88b5"
 
       - name: Remove obsolete source substitution machinery
         run: |
@@ -74,12 +60,8 @@ jobs:
           rm -f .github/promote_jm_re_core_v6.py
           rm -f .github/core_v6_payload_1.txt .github/core_v6_payload_1b.txt .github/core_v6_payload_2.txt .github/core_v6_payload_3.txt .github/core_v6_payload_4.txt
           rm -f .github/core_v5_to_v6.patch
+          rm -f .github/workflows/compile-v6-audit.yml
           rm -f .github/workflows/promote-core-v6.yml
-
-      - name: Audit final single-source tree
-        run: |
-          python tools/audit_jm_re.py .
-          test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "a568082396348a9ceed7b3feebc159798996b05b6005e6422a6185458b9285f6"
 
       - name: Commit canonical source
         run: |
