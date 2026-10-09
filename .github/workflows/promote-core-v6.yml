@@ -34,48 +34,15 @@ jobs:
           print('Exact Core SHA256='+got)
           PY
 
-      - name: Make production build single-source and exhaustive
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('.github/workflows/build-se.yml')
-          s=p.read_text()
-          start=s.find('      - name: Apply exact JM RE v5 force-greet source\n')
-          end=s.find('      - name: Set up MSVC x64\n', start)
-          if start >= 0 and end >= 0:
-              s=s[:start]+s[end:]
-          old='foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_SSS_WhoringController.pex"))'
-          new='foreach ($required in @("JM_RE_Core.pex", "JM_RE_Native.pex", "JM_RE_PLRPProvider.pex", "JM_RE_HydraProvider.pex", "JM_RE_ImmersiveWenchesProvider.pex", "JM_SSS_WhoringController.pex"))'
-          if old in s:
-              s=s.replace(old,new)
-          p.write_text(s)
-          PY
-          ! grep -q 'apply_jm_re_forcegreet.py' .github/workflows/build-se.yml
-          grep -q 'JM_RE_PLRPProvider.pex' .github/workflows/build-se.yml
-          grep -q 'JM_RE_HydraProvider.pex' .github/workflows/build-se.yml
-          grep -q 'JM_RE_ImmersiveWenchesProvider.pex' .github/workflows/build-se.yml
-
       - name: Production invariant audit
         run: |
           python tools/audit_jm_re.py .
           test "$(sha256sum papyrus/JM_RE_Core.psc | awk '{print $1}')" = "87b6148a13bfac1d40bb34f3965c5fe07be06caea70a41c17717c06ce753f5eb"
 
-      - name: Remove obsolete source-substitution machinery
-        run: |
-          rm -f .github/apply_jm_re_forcegreet.py
-          rm -f .github/jm_re_payload_suffix.txt
-          rm -f .github/workflows/compile-jm-re-core.yml
-          rm -f .github/promote_jm_re_core_v6.py
-          rm -f .github/core_v6_payload_1.txt .github/core_v6_payload_1b.txt .github/core_v6_payload_2.txt .github/core_v6_payload_3.txt .github/core_v6_payload_4.txt
-          rm -f .github/core_v5_to_v6.patch
-          rm -f .github/workflows/compile-v6-audit.yml
-          rm -f .github/jmre_v6_exact_1.txt .github/jmre_v6_exact_2.txt .github/jmre_v6_exact_3.txt .github/jmre_v6_exact_4.txt
-          rm -f .github/workflows/promote-core-v6.yml
-
-      - name: Commit canonical production tree
+      - name: Commit canonical Core
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Canonicalize fully audited JM RE v6"
+          git add papyrus/JM_RE_Core.psc
+          git commit -m "Canonicalize fully audited JM RE v6 Core"
           git push origin HEAD:main
