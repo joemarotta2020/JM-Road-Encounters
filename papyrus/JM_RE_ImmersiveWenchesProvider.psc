@@ -1,7 +1,7 @@
 Scriptname JM_RE_ImmersiveWenchesProvider Hidden
 {Soft-dependency classifier for Immersive Wenches travelling/Maid Wenches.
-Uses plugin ownership plus the mod's Maid Wench display name so generic inn wenches
-and wenches from Hateful/Forgotten/Judgment are never classified as this road category.}
+Requires Immersive Wenches to be installed and matches only the mod's "Maid Wench"
+display/base name so generic inn wenches and Hateful/Forgotten/Judgment wenches are excluded.}
 
 String Function GetPluginName() Global
 	Return "Immersive Wenches.esp"
@@ -30,17 +30,26 @@ Bool Function IsMaidWench(Actor akActor) Global
 		Return False
 	EndIf
 
-	ActorBase directBase = akActor.GetActorBase()
-	ActorBase leveledBase = akActor.GetLeveledActorBase()
-	If !IsFormFromPlugin(directBase) && !IsFormFromPlugin(leveledBase)
+	; Existing runtime evidence showed nearby Maid Wenches were reaching Core but being
+	; rejected before cadence/force-greet.  Do not require the resolved actor base to be
+	; owned by Immersive Wenches: travelling actors may resolve through leveled/template
+	; records whose owning plugin differs from the visible Maid Wench population.
+	; The soft dependency plus exact Maid Wench name remains the exclusion boundary.
+	If !IsInstalled()
 		Return False
 	EndIf
+
+	ActorBase directBase = akActor.GetActorBase()
+	ActorBase leveledBase = akActor.GetLeveledActorBase()
 
 	String actorName = akActor.GetDisplayName()
 	If actorName == ""
 		If directBase != None
 			actorName = directBase.GetName()
 		EndIf
+	EndIf
+	If actorName == "" && leveledBase != None
+		actorName = leveledBase.GetName()
 	EndIf
 
 	; The upstream mod labels its travelling/castle-maid population "Maid Wench".
