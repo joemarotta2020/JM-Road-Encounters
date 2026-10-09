@@ -24,7 +24,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python .github\apply_jm_re_forcegreet.py
+          $helperPath = '.github\apply_jm_re_forcegreet.py'
+          $helperText = Get-Content $helperPath -Raw
+          $needle = 'data = zlib.decompress(base64.b64decode(PAYLOAD))'
+          $replacement = "PAYLOAD += Path('.github/jm_re_payload_suffix.txt').read_text().strip()`n$needle"
+          if (-not $helperText.Contains($needle)) { throw 'Could not locate payload decode line.' }
+          $helperText = $helperText.Replace($needle, $replacement)
+          Set-Content -Path $helperPath -Value $helperText -Encoding utf8
+          python $helperPath
 
       - name: Set up MSVC x64
         uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
