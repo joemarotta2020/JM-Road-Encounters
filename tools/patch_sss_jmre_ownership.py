@@ -1,0 +1,110 @@
+from pathlib import Path
+
+p = Path("src/main.cpp")
+s = p.read_text()
+
+old = '''        bool IsSSSWhoringDialogueActive(
+            RE::StaticFunctionTag*,
+            RE::Actor* a_actor)
+        {
+            if (!a_actor || !IsSSSHumanoidCandidate(a_actor) ||
+                !IsSSSBiologicalFemaleCandidate(a_actor)) {
+                return false;
+            }
+
+            auto* manager = RE::MenuTopicManager::GetSingleton();
+            auto* quest = RE::TESForm::LookupByEditorID<RE::TESQuest>("SSS_Whoring");
+            if (!manager || !quest) {
+                return false;
+            }
+
+            const auto actorHandle = a_actor->GetHandle().native_handle();
+            const auto speakerHandle = manager->speaker.native_handle();
+            auto* info = manager->currentTopicInfo;
+
+            const bool active =
+                actorHandle != 0 &&
+                actorHandle == speakerHandle &&
+                info != nullptr &&
+                info->parentTopic != nullptr &&
+                info->parentTopic->ownerQuest == quest;
+
+            if (active && g_sssLogger) {
+                g_sssLogger->info(
+                    "verified live SSS dialogue speaker={} form=0x{:08X} "
+                    "topicInfo=0x{:08X}",
+                    a_actor->GetName(),
+                    a_actor->GetFormID(),
+                    info->GetFormID());
+            }
+            return active;
+        }
+'''
+
+new = '''        bool IsSSSWhoringDialogueActive(
+            RE::StaticFunctionTag*,
+            RE::Actor* a_actor)
+        {
+            if (!a_actor || !IsSSSHumanoidCandidate(a_actor) ||
+                !IsSSSBiologicalFemaleCandidate(a_actor)) {
+                return false;
+            }
+
+            auto* manager = RE::MenuTopicManager::GetSingleton();
+            auto* quest = RE::TESForm::LookupByEditorID<RE::TESQuest>("SSS_Whoring");
+            auto* dataHandler = RE::TESDataHandler::GetSingleton();
+            if (!manager || !quest || !dataHandler) {
+                return false;
+            }
+
+            // Hard encounter-ownership invariant. JM_RE_ForceGreetQuest is local
+            // FormID 0x818 in JM_RoadEncounters.esp. Papyrus starts it only while
+            // JM RE owns a force-greet and stops it when that interaction clears.
+            // Sacred Band can legitimately surface SSS-owned INFOs, so INFO
+            // ownership alone must never authorize an SSS cooldown commit.
+            auto* jmReForceGreetQuest = dataHandler->LookupForm<RE::TESQuest>(
+                0x00000818, "JM_RoadEncounters.esp");
+            const bool jmReOwnsDialogue =
+                jmReForceGreetQuest && jmReForceGreetQuest->IsRunning();
+
+            const auto actorHandle = a_actor->GetHandle().native_handle();
+            const auto speakerHandle = manager->speaker.native_handle();
+            auto* info = manager->currentTopicInfo;
+
+            const bool speakerMatchesReservedActor =
+                actorHandle != 0 && actorHandle == speakerHandle;
+            const bool topicOwnedBySSS =
+                info != nullptr &&
+                info->parentTopic != nullptr &&
+                info->parentTopic->ownerQuest == quest;
+
+            const bool active = Eligibility::ShouldAcceptSSSDialogueCommit(
+                jmReOwnsDialogue,
+                speakerMatchesReservedActor,
+                topicOwnedBySSS);
+
+            if (jmReOwnsDialogue && speakerMatchesReservedActor && g_sssLogger) {
+                g_sssLogger->info(
+                    "rejected SSS dialogue commit: JM RE owns force-greet "
+                    "speaker={} form=0x{:08X}",
+                    a_actor->GetName(),
+                    a_actor->GetFormID());
+            }
+
+            if (active && g_sssLogger) {
+                g_sssLogger->info(
+                    "verified live SSS dialogue speaker={} form=0x{:08X} "
+                    "topicInfo=0x{:08X}",
+                    a_actor->GetName(),
+                    a_actor->GetFormID(),
+                    info->GetFormID());
+            }
+            return active;
+        }
+'''
+
+assert old in s, "IsSSSWhoringDialogueActive baseline anchor missing"
+s = s.replace(old, new, 1)
+assert '0x00000818, "JM_RoadEncounters.esp"' in s
+assert "ShouldAcceptSSSDialogueCommit" in s
+p.write_text(s)
