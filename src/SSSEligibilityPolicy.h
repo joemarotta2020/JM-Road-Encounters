@@ -19,6 +19,16 @@ namespace JM::RoadEncounters::Eligibility
         return a_hasActorBase && a_baseSex == 1;
     }
 
+    constexpr bool ShouldAcceptSSSDialogueCommit(
+        bool a_jmReOwnsDialogue,
+        bool a_speakerMatchesReservedActor,
+        bool a_topicOwnedBySSS) noexcept
+    {
+        return !a_jmReOwnsDialogue &&
+               a_speakerMatchesReservedActor &&
+               a_topicOwnedBySSS;
+    }
+
     // Compile-time regression coverage for the policy that prevents talking
     // creature races (for example Skaven using the Riekling race) from ever
     // entering the SSS_Whoring acquisition path.
@@ -35,4 +45,13 @@ namespace JM::RoadEncounters::Eligibility
     static_assert(!IsBiologicalFemaleSSSCandidate(true, 0));
     static_assert(!IsBiologicalFemaleSSSCandidate(false, 1));
     static_assert(!IsBiologicalFemaleSSSCandidate(true, -1));
+
+    // Dialogue ownership invariant: an active JM RE force-greet always vetoes
+    // SSS cooldown commitment, even when the visible dialogue INFO belongs to
+    // SSS_Whoring. Normal SSS dialogue still requires the reserved speaker and
+    // an INFO owned by the SSS_Whoring quest.
+    static_assert(!ShouldAcceptSSSDialogueCommit(true, true, true));
+    static_assert(ShouldAcceptSSSDialogueCommit(false, true, true));
+    static_assert(!ShouldAcceptSSSDialogueCommit(false, false, true));
+    static_assert(!ShouldAcceptSSSDialogueCommit(false, true, false));
 }
