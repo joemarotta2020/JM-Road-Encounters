@@ -22,11 +22,12 @@ namespace JM::RoadEncounters::Eligibility
     constexpr bool ShouldAcceptSSSDialogueCommit(
         bool a_jmReOwnsDialogue,
         bool a_speakerMatchesReservedActor,
-        bool a_topicOwnedBySSS) noexcept
+        bool a_topicOwnedBySSS,
+        bool a_authoritativeSSSPackageActive) noexcept
     {
         return !a_jmReOwnsDialogue &&
                a_speakerMatchesReservedActor &&
-               a_topicOwnedBySSS;
+               (a_topicOwnedBySSS || a_authoritativeSSSPackageActive);
     }
 
     // Compile-time regression coverage for the policy that prevents talking
@@ -46,12 +47,14 @@ namespace JM::RoadEncounters::Eligibility
     static_assert(!IsBiologicalFemaleSSSCandidate(false, 1));
     static_assert(!IsBiologicalFemaleSSSCandidate(true, -1));
 
-    // Dialogue ownership invariant: an active JM RE force-greet always vetoes
-    // SSS cooldown commitment, even when the visible dialogue INFO belongs to
-    // SSS_Whoring. Normal SSS dialogue still requires the reserved speaker and
-    // an INFO owned by the SSS_Whoring quest.
-    static_assert(!ShouldAcceptSSSDialogueCommit(true, true, true));
-    static_assert(ShouldAcceptSSSDialogueCommit(false, true, true));
-    static_assert(!ShouldAcceptSSSDialogueCommit(false, false, true));
-    static_assert(!ShouldAcceptSSSDialogueCommit(false, true, false));
+    // Dialogue ownership invariants. A foreign JM RE force-greet always vetoes
+    // SSS cooldown commitment. Otherwise the exact reserved speaker may commit
+    // either through an SSS-owned INFO or through the authoritative original SSS
+    // approach package. The latter covers Skyrim frames where currentTopicInfo
+    // is absent or reports a non-SSS owner while the real SSS force-greet is live.
+    static_assert(!ShouldAcceptSSSDialogueCommit(true, true, true, true));
+    static_assert(ShouldAcceptSSSDialogueCommit(false, true, true, false));
+    static_assert(ShouldAcceptSSSDialogueCommit(false, true, false, true));
+    static_assert(!ShouldAcceptSSSDialogueCommit(false, false, true, true));
+    static_assert(!ShouldAcceptSSSDialogueCommit(false, true, false, false));
 }
