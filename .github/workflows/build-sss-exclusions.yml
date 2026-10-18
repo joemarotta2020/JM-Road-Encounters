@@ -42,7 +42,7 @@ jobs:
             if (-not $text.Contains($required)) { throw "Missing SSS exclusion invariant: $required" }
           }
           $ini = Get-Content config/JM_RoadEncounters.ini -Raw
-          if (-not $ini.Contains('Form1=pchsWartimes.esp|0x005A15')) { throw 'Mother exclusion missing from INI.' }
+          if (-not $ini.Contains('Form1=pchsWartimes.esp|0x005A16')) { throw 'Mother exclusion missing from INI.' }
 
       - name: Audit canonical JM RE source
         shell: pwsh
