@@ -23,12 +23,21 @@ for forbidden in (
 ):
     assert forbidden not in main, f"forbidden post-regression behavior remains: {forbidden}"
 
-# The pre-feature SSS controller behavior is locked. Do not carry forward the
-# later watchdog/dialogue-state experiments into the recovery build.
-assert "Int Property AcquisitionTimeoutTicks = 16 Auto Hidden" in controller
-assert "AcquisitionDialogueObserved" not in controller
-assert "live SSS dialogue verified for actor=" in controller
-assert "BeginEncounter(candidate)" in controller
+# Existing-save compatibility is locked: retain the modern controller's persisted
+# fields and post-dialogue/SOS state, but restore the proven dialogue commit gate.
+for required in (
+    "Int Property AcquisitionTimeoutTicks = 60 Auto Hidden",
+    "Int Property AcquisitionPostDialogueGraceTicks = 60 Auto Hidden",
+    "Bool AcquisitionDialogueObserved = False",
+    "Bool JM_SOSReassertPending = False",
+    "Actor JM_SOSReassertActor = None",
+    "Float JM_SOSReassertDeadlineReal = -9999.0",
+    "live SSS dialogue verified for actor=",
+    "BeginEncounter(candidate)",
+    "JM_TryCommitPendingFromActivePlayerThread()",
+):
+    assert required in controller, f"missing save-compatible controller invariant: {required}"
+
 assert "waiting for original SSS acceptance fragment" not in controller
 
 print("SSS recovery source invariants PASS")
