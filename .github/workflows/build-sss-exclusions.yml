@@ -42,12 +42,14 @@ jobs:
             'JM_SSS_EXCLUSION_CONFIG_V1',
             'JM_SSS_PLUGIN_LOCAL_RESOLVER_V1',
             'JM_SSS_DIALOGUE_OWNERSHIP_V2',
+            'JM_SSS_DIALOGUE_OWNERSHIP_V3',
             'JM_SSS_QUEST_STARTUP_V1',
             'ResolveSSSExclusionForm',
             'LoadSSSWhoringExclusions',
             'IsSSSWhoringExcluded',
             'kSSSWhoringExcludedActorsFormID = 0x00000805',
             'sssApproachPackageActive',
+            'accepted SSS dialogue by authoritative package fallback',
             'SSS_Whoring startup reconciliation',
             'SKSE::MessagingInterface::kDataLoaded',
             'SSS exclusion config loaded')) {
@@ -77,6 +79,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion parser compile failed.' }
           .\build\tests\SSSExclusionConfigTests.exe
           if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion parser tests failed.' }
+
+      - name: Test SSS dialogue ownership policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cl /nologo /std:c++20 /EHsc tests\SSSDialogueOwnershipTests.cpp /Fe:build\tests\SSSDialogueOwnershipTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS dialogue ownership regression compile failed.' }
+          .\build\tests\SSSDialogueOwnershipTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS dialogue ownership regression test failed.' }
 
       - name: Prepare vcpkg
         shell: pwsh
@@ -116,6 +127,7 @@ jobs:
             'SSSWhoringExclusions',
             'SSS exclusion config loaded',
             'accepted SSS dialogue while JM RE force-greet quest is running',
+            'accepted SSS dialogue by authoritative package fallback',
             'foreign JM RE force-greet',
             'SSS_Whoring startup reconciliation')) {
             if (-not $ascii.Contains($required)) { throw "Built DLL does not contain expected SSS implementation string: $required" }
@@ -130,7 +142,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/main.cpp
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'Reconcile SSS quest startup before native acquisition'
+            git commit -m 'Use authoritative SSS package for dialogue ownership fallback'
             git push origin HEAD:feature/sss-whoring-exclusions
           } else {
             Write-Host 'Canonical source already committed.'
@@ -148,11 +160,13 @@ jobs:
           Copy-Item config\JM_RoadEncounters.ini artifact\SKSE\Plugins\JM_RoadEncounters.ini
           Copy-Item src\main.cpp artifact\Source\JM-Road-Encounters\src\main.cpp
           Copy-Item src\SSSExclusionConfig.h artifact\Source\JM-Road-Encounters\src\SSSExclusionConfig.h
+          Copy-Item src\SSSEligibilityPolicy.h artifact\Source\JM-Road-Encounters\src\SSSEligibilityPolicy.h
           $hash = (Get-FileHash $dll.FullName -Algorithm SHA256).Hash
           "DLL SHA256: $hash" | Set-Content artifact\BUILD_INFO.txt
           "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
           "Feature: configurable SSS_Whoring exclusions; Wartimes Mother default" | Add-Content artifact\BUILD_INFO.txt
-          "Fix: legitimate SSS package ownership outranks stale/running JM RE force-greet quest state" | Add-Content artifact\BUILD_INFO.txt
+          "Fix: exact reserved SSS speaker may commit via authoritative original SSS approach package when currentTopicInfo is unavailable or non-SSS" | Add-Content artifact\BUILD_INFO.txt
+          "Invariant: foreign JM RE force-greet ownership still vetoes SSS commit" | Add-Content artifact\BUILD_INFO.txt
           "Fix: SSS_Whoring is automatically started before native acquisition unless terminal stage 200+" | Add-Content artifact\BUILD_INFO.txt
 
       - name: Upload deployment artifact
