@@ -1000,6 +1000,42 @@ namespace JM::RoadEncounters
                 return;
             }
 
+            // JM_SSS_QUEST_STARTUP_V1
+            // The native acquisition controller is useless if the original
+            // SSS_Whoring quest is Enabled/Stopped: its aliases/packages and
+            // dialogue remain dormant even though a bound controller script may
+            // still be dispatchable.  Reconcile that lifecycle invariant before
+            // waking acquisition.  Preserve intentional terminal completion by
+            // never restarting stage 200+.
+            if (!sssQuest->IsRunning()) {
+                const auto stage = sssQuest->GetCurrentStageID();
+                if (stage >= 200) {
+                    if (g_sssLogger) {
+                        g_sssLogger->info(
+                            "SSS_Whoring is stopped at terminal stage {}; native SSS wake skipped",
+                            stage);
+                    }
+                    return;
+                }
+
+                const bool started = sssQuest->Start();
+                if (g_sssLogger) {
+                    g_sssLogger->info(
+                        "SSS_Whoring startup reconciliation: wasRunning=false stage={} "
+                        "Start()={} nowRunning={}",
+                        stage,
+                        started,
+                        sssQuest->IsRunning());
+                }
+                if (!sssQuest->IsRunning()) {
+                    if (g_sssLogger) {
+                        g_sssLogger->error(
+                            "SSS_Whoring startup reconciliation failed; acquisition wake skipped");
+                    }
+                    return;
+                }
+            }
+
             const auto sssHandle = handlePolicy->GetHandleForObject(
                 static_cast<RE::VMTypeID>(sssQuest->GetFormType()), sssQuest);
 
