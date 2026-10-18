@@ -869,10 +869,24 @@ namespace JM::RoadEncounters
                 info->parentTopic != nullptr &&
                 info->parentTopic->ownerQuest == quest;
 
+            // JM_SSS_DIALOGUE_OWNERSHIP_V3
+            // The authoritative original SSS approach package is a valid
+            // ownership signal when Skyrim's MenuTopicManager does not expose
+            // an SSS-owned currentTopicInfo during the polling frame.  Exact
+            // reserved-speaker matching and the foreign-JM-RE veto still apply.
             const bool active = Eligibility::ShouldAcceptSSSDialogueCommit(
                 jmReOwnsDialogue,
                 speakerMatchesReservedActor,
-                topicOwnedBySSS);
+                topicOwnedBySSS,
+                sssApproachPackageActive);
+
+            if (active && !topicOwnedBySSS && sssApproachPackageActive && g_sssLogger) {
+                g_sssLogger->info(
+                    "accepted SSS dialogue by authoritative package fallback: "
+                    "speaker={} form=0x{:08X}",
+                    a_actor->GetName(),
+                    a_actor->GetFormID());
+            }
 
             if (jmReOwnsDialogue && speakerMatchesReservedActor && g_sssLogger) {
                 g_sssLogger->info(
@@ -891,12 +905,13 @@ namespace JM::RoadEncounters
             }
 
             if (active && g_sssLogger) {
+                const auto topicInfoFormID = info ? info->GetFormID() : 0;
                 g_sssLogger->info(
                     "verified live SSS dialogue speaker={} form=0x{:08X} "
                     "topicInfo=0x{:08X}",
                     a_actor->GetName(),
                     a_actor->GetFormID(),
-                    info->GetFormID());
+                    topicInfoFormID);
             }
             return active;
         }
