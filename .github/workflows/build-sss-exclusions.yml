@@ -1,0 +1,143 @@
+name: Build SSS Whoring Exclusions
+
+on:
+  push:
+    branches:
+      - feature/sss-whoring-exclusions
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-se:
+    name: Skyrim SE 1.5.97 SSS exclusions
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply canonical SSS exclusion patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/apply_sss_exclusions.py src/main.cpp
+          if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion source patch failed.' }
+
+      - name: Verify SSS exclusion source invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $text = Get-Content src/main.cpp -Raw
+          foreach ($required in @(
+            'JM_SSS_EXCLUSION_CONFIG_V1',
+            'LoadSSSWhoringExclusions',
+            'IsSSSWhoringExcluded',
+            'kSSSWhoringExcludedActorsFormID = 0x00000805',
+            'SKSE::MessagingInterface::kDataLoaded',
+            'SSS exclusion config loaded')) {
+            if (-not $text.Contains($required)) { throw "Missing SSS exclusion invariant: $required" }
+          }
+          $ini = Get-Content config/JM_RoadEncounters.ini -Raw
+          if (-not $ini.Contains('Form1=pchsWartimes.esp|0x005A15')) { throw 'Mother exclusion missing from INI.' }
+
+      - name: Audit canonical JM RE source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/audit_jm_re.py .
+          if ($LASTEXITCODE -ne 0) { throw 'JM RE production invariant audit failed.' }
+
+      - name: Set up MSVC x64
+        uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
+        with:
+          arch: x64
+
+      - name: Test SSS exclusion parser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path build\tests | Out-Null
+          cl /nologo /std:c++20 /EHsc tests\SSSExclusionConfigTests.cpp /Fe:build\tests\SSSExclusionConfigTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion parser compile failed.' }
+          .\build\tests\SSSExclusionConfigTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion parser tests failed.' }
+
+      - name: Prepare vcpkg
+        shell: pwsh
+        run: |
+          C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          C:\vcpkg\vcpkg.exe version
+
+      - name: Configure release
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+
+      - name: Build release DLL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --build build --config Release --target JM_RoadEncounters -- /m
+          if ($LASTEXITCODE -ne 0) { throw 'JM_RoadEncounters DLL build failed.' }
+
+      - name: Verify SKSE plugin exports and exclusion strings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = Get-ChildItem -Path build -Recurse -File -Filter 'JM_RoadEncounters.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'JM_RoadEncounters.dll was not produced.' }
+          $exports = (& dumpbin /nologo /exports $dll.FullName) -join "`n"
+          foreach ($required in @('SKSEPlugin_Load', 'SKSEPlugin_Query', 'SKSEPlugin_Version')) {
+            if ($exports -notmatch [regex]::Escape($required)) { throw "Missing required SKSE export: $required" }
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
+          $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+          foreach ($required in @('JM_SSS_Overhaul.esp','JM_RoadEncounters.ini','SSSWhoringExclusions','SSS exclusion config loaded')) {
+            if (-not $ascii.Contains($required)) { throw "Built DLL does not contain expected exclusion implementation string: $required" }
+          }
+          Get-FileHash $dll.FullName -Algorithm SHA256 | Format-List
+
+      - name: Commit canonical patched source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main.cpp
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Implement configurable SSS whoring exclusions'
+            git push origin HEAD:feature/sss-whoring-exclusions
+          } else {
+            Write-Host 'Canonical source already committed.'
+          }
+
+      - name: Stage deployment artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path artifact\SKSE\Plugins | Out-Null
+          New-Item -ItemType Directory -Force -Path artifact\Source\JM-Road-Encounters\src | Out-Null
+          $dll = Get-ChildItem -Path build -Recurse -File -Filter 'JM_RoadEncounters.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'JM_RoadEncounters.dll was not produced.' }
+          Copy-Item $dll.FullName artifact\SKSE\Plugins\JM_RoadEncounters.dll
+          Copy-Item config\JM_RoadEncounters.ini artifact\SKSE\Plugins\JM_RoadEncounters.ini
+          Copy-Item src\main.cpp artifact\Source\JM-Road-Encounters\src\main.cpp
+          Copy-Item src\SSSExclusionConfig.h artifact\Source\JM-Road-Encounters\src\SSSExclusionConfig.h
+          $hash = (Get-FileHash $dll.FullName -Algorithm SHA256).Hash
+          "DLL SHA256: $hash" | Set-Content artifact\BUILD_INFO.txt
+          "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
+          "Feature: configurable SSS_Whoring exclusions; Wartimes Mother default" | Add-Content artifact\BUILD_INFO.txt
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JM-SSS-Whoring-Exclusions-SE-1.5.97
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
