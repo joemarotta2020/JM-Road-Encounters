@@ -20,11 +20,16 @@ Actor Function GetScannedActor(Int aiClientId, Int aiIndex) Global Native
 ; Returns -1 when the actor is not currently usable.
 Int Function ClassifySSSWhoringActor(Actor akActor) Global Native
 
+; True if akActor's base NPC is in the configured SSS_Whoring permanent
+; exclusion set. This query does not select actors, fill aliases, or commit cooldown.
+Bool Function IsSSSWhoringExcluded(Actor akActor) Global Native
+
 ; True while the actor is running the SSS force-greet package/template associated with the supplied quest alias index.
 Bool Function IsSSSWhoringPackageActive(Actor akActor, Int aiAliasIndex) Global Native
 
 ; Returns the nearest usable SSS_Whoring actor using explicit native
-; classification; no dialogue INFO condition emulation is required.
+; classification; retained for ABI/source compatibility, but recovery gameplay
+; leaves acquisition authority with the original SSS_WhoringIdle INFOs.
 Actor Function FindSSSWhoringActor(ObjectReference akCenter, Float afRadius = 2200.0, Int aiMaxResults = 64, Actor akExclude1 = None, Actor akExclude2 = None, Actor akExclude3 = None) Global Native
 
 ; True only while akActor is the live dialogue speaker and the current topic belongs to SSS_Whoring.
