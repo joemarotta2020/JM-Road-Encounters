@@ -30,6 +30,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion resolver patch failed.' }
           python tools/fix_sss_dialogue_ownership.py src/main.cpp
           if ($LASTEXITCODE -ne 0) { throw 'SSS dialogue ownership patch failed.' }
+          python tools/fix_sss_quest_startup.py src/main.cpp
+          if ($LASTEXITCODE -ne 0) { throw 'SSS quest startup reconciliation patch failed.' }
 
       - name: Verify SSS exclusion source invariants
         shell: pwsh
@@ -40,11 +42,13 @@ jobs:
             'JM_SSS_EXCLUSION_CONFIG_V1',
             'JM_SSS_PLUGIN_LOCAL_RESOLVER_V1',
             'JM_SSS_DIALOGUE_OWNERSHIP_V2',
+            'JM_SSS_QUEST_STARTUP_V1',
             'ResolveSSSExclusionForm',
             'LoadSSSWhoringExclusions',
             'IsSSSWhoringExcluded',
             'kSSSWhoringExcludedActorsFormID = 0x00000805',
             'sssApproachPackageActive',
+            'SSS_Whoring startup reconciliation',
             'SKSE::MessagingInterface::kDataLoaded',
             'SSS exclusion config loaded')) {
             if (-not $text.Contains($required)) { throw "Missing SSS exclusion invariant: $required" }
@@ -112,7 +116,8 @@ jobs:
             'SSSWhoringExclusions',
             'SSS exclusion config loaded',
             'accepted SSS dialogue while JM RE force-greet quest is running',
-            'foreign JM RE force-greet')) {
+            'foreign JM RE force-greet',
+            'SSS_Whoring startup reconciliation')) {
             if (-not $ascii.Contains($required)) { throw "Built DLL does not contain expected SSS implementation string: $required" }
           }
           Get-FileHash $dll.FullName -Algorithm SHA256 | Format-List
@@ -125,7 +130,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/main.cpp
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'Fix SSS dialogue ownership and exclusion runtime'
+            git commit -m 'Reconcile SSS quest startup before native acquisition'
             git push origin HEAD:feature/sss-whoring-exclusions
           } else {
             Write-Host 'Canonical source already committed.'
@@ -148,6 +153,7 @@ jobs:
           "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
           "Feature: configurable SSS_Whoring exclusions; Wartimes Mother default" | Add-Content artifact\BUILD_INFO.txt
           "Fix: legitimate SSS package ownership outranks stale/running JM RE force-greet quest state" | Add-Content artifact\BUILD_INFO.txt
+          "Fix: SSS_Whoring is automatically started before native acquisition unless terminal stage 200+" | Add-Content artifact\BUILD_INFO.txt
 
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
