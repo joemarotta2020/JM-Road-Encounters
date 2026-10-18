@@ -1,53 +1,53 @@
 from pathlib import Path
 import sys
 
-MARKER = "JM_SSS_DIALOGUE_OWNERSHIP_V2"
+MARKER_V2 = "JM_SSS_DIALOGUE_OWNERSHIP_V2"
+MARKER_V3 = "JM_SSS_DIALOGUE_OWNERSHIP_V3"
 
-OLD_OWNERSHIP = '''            const bool jmReOwnsDialogue =
-                jmReForceGreetQuest && jmReForceGreetQuest->IsRunning();
+OLD_ACTIVE = '''            const bool active = Eligibility::ShouldAcceptSSSDialogueCommit(
+                jmReOwnsDialogue,
+                speakerMatchesReservedActor,
+                topicOwnedBySSS);
 '''
 
-NEW_OWNERSHIP = '''            // JM_SSS_DIALOGUE_OWNERSHIP_V2
-            // JM_RE_ForceGreetQuest can remain running while the original
-            // SSS_Whoring alias/package is legitimately driving the selected
-            // actor.  Treat JM RE as foreign dialogue ownership only when the
-            // reserved actor is NOT currently running one of the authoritative
-            // SSS approach packages.  This preserves the Sacred Band / unrelated
-            // JM RE veto without blocking legitimate SSS force-greets.
-            const bool jmReForceGreetRunning =
-                jmReForceGreetQuest && jmReForceGreetQuest->IsRunning();
-            const bool sssApproachPackageActive =
-                IsSSSWhoringPackageActiveImpl(a_actor, 0) ||
-                IsSSSWhoringPackageActiveImpl(a_actor, 2) ||
-                IsSSSWhoringPackageActiveImpl(a_actor, 3) ||
-                IsSSSWhoringPackageActiveImpl(a_actor, 5);
-            const bool jmReOwnsDialogue =
-                jmReForceGreetRunning && !sssApproachPackageActive;
-'''
+NEW_ACTIVE = '''            // JM_SSS_DIALOGUE_OWNERSHIP_V3
+            // The authoritative original SSS approach package is a valid
+            // ownership signal when Skyrim's MenuTopicManager does not expose
+            // an SSS-owned currentTopicInfo during the polling frame.  Exact
+            // reserved-speaker matching and the foreign-JM-RE veto still apply.
+            const bool active = Eligibility::ShouldAcceptSSSDialogueCommit(
+                jmReOwnsDialogue,
+                speakerMatchesReservedActor,
+                topicOwnedBySSS,
+                sssApproachPackageActive);
 
-OLD_REJECT = '''            if (jmReOwnsDialogue && speakerMatchesReservedActor && g_sssLogger) {
+            if (active && !topicOwnedBySSS && sssApproachPackageActive && g_sssLogger) {
                 g_sssLogger->info(
-                    "rejected SSS dialogue commit: JM RE owns force-greet "
+                    "accepted SSS dialogue by authoritative package fallback: "
                     "speaker={} form=0x{:08X}",
                     a_actor->GetName(),
                     a_actor->GetFormID());
             }
 '''
 
-NEW_REJECT = '''            if (jmReOwnsDialogue && speakerMatchesReservedActor && g_sssLogger) {
+OLD_VERIFIED = '''            if (active && g_sssLogger) {
                 g_sssLogger->info(
-                    "rejected SSS dialogue commit: foreign JM RE force-greet "
-                    "speaker={} form=0x{:08X}",
+                    "verified live SSS dialogue speaker={} form=0x{:08X} "
+                    "topicInfo=0x{:08X}",
                     a_actor->GetName(),
-                    a_actor->GetFormID());
+                    a_actor->GetFormID(),
+                    info->GetFormID());
             }
+'''
 
-            if (active && jmReForceGreetRunning && sssApproachPackageActive && g_sssLogger) {
+NEW_VERIFIED = '''            if (active && g_sssLogger) {
+                const auto topicInfoFormID = info ? info->GetFormID() : 0;
                 g_sssLogger->info(
-                    "accepted SSS dialogue while JM RE force-greet quest is running: "
-                    "authoritative SSS package owns speaker={} form=0x{:08X}",
+                    "verified live SSS dialogue speaker={} form=0x{:08X} "
+                    "topicInfo=0x{:08X}",
                     a_actor->GetName(),
-                    a_actor->GetFormID());
+                    a_actor->GetFormID(),
+                    topicInfoFormID);
             }
 '''
 
@@ -67,15 +67,18 @@ def main() -> int:
     path = Path(sys.argv[1])
     text = path.read_text(encoding="utf-8")
 
-    if MARKER in text:
-        print("SSS dialogue ownership V2 already applied")
+    if MARKER_V3 in text:
+        print("SSS dialogue ownership V3 already applied")
         return 0
 
-    text = replace_once(text, OLD_OWNERSHIP, NEW_OWNERSHIP, "ownership block")
-    text = replace_once(text, OLD_REJECT, NEW_REJECT, "rejection log block")
+    if MARKER_V2 not in text:
+        raise RuntimeError("SSS dialogue ownership V2 baseline marker not found")
+
+    text = replace_once(text, OLD_ACTIVE, NEW_ACTIVE, "dialogue commit policy call")
+    text = replace_once(text, OLD_VERIFIED, NEW_VERIFIED, "verified dialogue log")
 
     path.write_text(text, encoding="utf-8")
-    print("Applied SSS dialogue ownership V2")
+    print("Applied SSS dialogue ownership V3")
     return 0
 
 
