@@ -841,8 +841,22 @@ namespace JM::RoadEncounters
             // ownership alone must never authorize an SSS cooldown commit.
             auto* jmReForceGreetQuest = dataHandler->LookupForm<RE::TESQuest>(
                 0x00000818, "JM_RoadEncounters.esp");
-            const bool jmReOwnsDialogue =
+            // JM_SSS_DIALOGUE_OWNERSHIP_V2
+            // JM_RE_ForceGreetQuest can remain running while the original
+            // SSS_Whoring alias/package is legitimately driving the selected
+            // actor.  Treat JM RE as foreign dialogue ownership only when the
+            // reserved actor is NOT currently running one of the authoritative
+            // SSS approach packages.  This preserves the Sacred Band / unrelated
+            // JM RE veto without blocking legitimate SSS force-greets.
+            const bool jmReForceGreetRunning =
                 jmReForceGreetQuest && jmReForceGreetQuest->IsRunning();
+            const bool sssApproachPackageActive =
+                IsSSSWhoringPackageActiveImpl(a_actor, 0) ||
+                IsSSSWhoringPackageActiveImpl(a_actor, 2) ||
+                IsSSSWhoringPackageActiveImpl(a_actor, 3) ||
+                IsSSSWhoringPackageActiveImpl(a_actor, 5);
+            const bool jmReOwnsDialogue =
+                jmReForceGreetRunning && !sssApproachPackageActive;
 
             const auto actorHandle = a_actor->GetHandle().native_handle();
             const auto speakerHandle = manager->speaker.native_handle();
@@ -862,8 +876,16 @@ namespace JM::RoadEncounters
 
             if (jmReOwnsDialogue && speakerMatchesReservedActor && g_sssLogger) {
                 g_sssLogger->info(
-                    "rejected SSS dialogue commit: JM RE owns force-greet "
+                    "rejected SSS dialogue commit: foreign JM RE force-greet "
                     "speaker={} form=0x{:08X}",
+                    a_actor->GetName(),
+                    a_actor->GetFormID());
+            }
+
+            if (active && jmReForceGreetRunning && sssApproachPackageActive && g_sssLogger) {
+                g_sssLogger->info(
+                    "accepted SSS dialogue while JM RE force-greet quest is running: "
+                    "authoritative SSS package owns speaker={} form=0x{:08X}",
                     a_actor->GetName(),
                     a_actor->GetFormID());
             }
