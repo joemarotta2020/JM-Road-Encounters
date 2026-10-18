@@ -7,6 +7,41 @@
 #include <string>
 #include <string_view>
 
+// CommonLibSSE-NG v3.7.0 LookupFormID() unconditionally incorporates
+// TESFile::smallFileCompileIndex on SE. For a normal (non-ESL) plugin this can
+// construct the wrong runtime FormID. SSS exclusions need reliable plugin-local
+// resolution, so specialize only the TESForm lookup used by the exclusion
+// loader and construct the runtime ID explicitly from the file's load mode.
+namespace RE
+{
+    template <>
+    inline TESForm* TESDataHandler::LookupForm<TESForm>(
+        FormID a_localFormID,
+        std::string_view a_modName)
+    {
+        const TESFile* file = LookupModByName(a_modName);
+        if (!file || file->compileIndex == 0xFF) {
+            return nullptr;
+        }
+
+        FormID runtimeFormID = 0;
+        if (file->compileIndex == 0xFE) {
+            if (file->smallFileCompileIndex == 0xFFFF) {
+                return nullptr;
+            }
+            runtimeFormID = 0xFE000000u |
+                            (static_cast<FormID>(file->smallFileCompileIndex) << 12) |
+                            (a_localFormID & 0x00000FFFu);
+        } else {
+            runtimeFormID =
+                (static_cast<FormID>(file->compileIndex) << 24) |
+                (a_localFormID & 0x00FFFFFFu);
+        }
+
+        return TESForm::LookupByID(runtimeFormID);
+    }
+}
+
 namespace JM::RoadEncounters::SSSExclusionConfig
 {
     struct Entry
