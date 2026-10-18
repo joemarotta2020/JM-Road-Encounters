@@ -20,12 +20,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply minimal recovery patch
+      - name: Apply minimal native recovery patch
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           python tools/apply_sss_recovery.py src/main.cpp
           if ($LASTEXITCODE -ne 0) { throw 'SSS recovery source patch failed.' }
+
+      - name: Restore save-compatible controller source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/restore_save_compatible_sss_controller.py
+          if ($LASTEXITCODE -ne 0) { throw 'Save-compatible SSS controller restore failed.' }
 
       - name: Test recovery source invariants
         shell: pwsh
@@ -113,7 +120,7 @@ jobs:
           Pop-Location
           Remove-Item $flagsTemp -Recurse -Force
 
-      - name: Compile pre-feature SSS controller
+      - name: Compile save-compatible SSS controller
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -146,7 +153,9 @@ jobs:
 
           $pex = 'build\papyrus\JM_SSS_WhoringController.pex'
           $pexAscii = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($pex))
-          if (-not $pexAscii.Contains('live SSS dialogue verified for actor=')) { throw 'PEX does not contain pre-feature commit path.' }
+          foreach ($required in @('live SSS dialogue verified for actor=', 'AcquisitionDialogueObserved', 'JM_SOSReassertPending')) {
+            if (-not $pexAscii.Contains($required)) { throw "PEX missing save-compatible recovery marker: $required" }
+          }
           if ($pexAscii.Contains('waiting for original SSS acceptance fragment')) { throw 'PEX contains later broken wait-for-fragment behavior.' }
 
           Get-FileHash $dll.FullName -Algorithm SHA256 | Format-List
@@ -158,12 +167,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/main.cpp
+          git add src/main.cpp papyrus/JM_SSS_WhoringController.psc
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'Restore pre-feature SSS behavior with in-memory exclusions'
+            git commit -m 'Restore strict SSS ownership with save-compatible controller'
             git push origin HEAD:recovery/sss-prefeature-exclusion-only
           } else {
-            Write-Host 'Canonical recovery source already committed.'
+            Write-Host 'Canonical recovery sources already committed.'
           }
 
       - name: Stage recovery artifact
@@ -185,12 +194,13 @@ jobs:
 
           $dllHash = (Get-FileHash $dll.FullName -Algorithm SHA256).Hash
           $pexHash = (Get-FileHash build\papyrus\JM_SSS_WhoringController.pex -Algorithm SHA256).Hash
-          "Recovery baseline commit: edea94e124068e89cd7231d48d05a454e76bbe37" | Set-Content artifact\BUILD_INFO.txt
+          "Recovery native baseline commit: edea94e124068e89cd7231d48d05a454e76bbe37" | Set-Content artifact\BUILD_INFO.txt
           "DLL SHA256: $dllHash" | Add-Content artifact\BUILD_INFO.txt
           "Controller PEX SHA256: $pexHash" | Add-Content artifact\BUILD_INFO.txt
           "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
-          "Architecture: pre-feature SSS behavior plus in-memory-only configurable exclusions" | Add-Content artifact\BUILD_INFO.txt
-          "No FLST dependency; no dialogue ownership fallback; no SSS startup reconciliation" | Add-Content artifact\BUILD_INFO.txt
+          "Architecture: strict pre-regression SSS dialogue ownership plus in-memory-only configurable exclusions" | Add-Content artifact\BUILD_INFO.txt
+          "Controller: current serialized field layout retained; only broken wait-for-fragment commit behavior rolled back" | Add-Content artifact\BUILD_INFO.txt
+          "No FLST dependency; no package-fallback dialogue ownership; no native SSS startup reconciliation" | Add-Content artifact\BUILD_INFO.txt
 
       - name: Upload recovery artifact
         uses: actions/upload-artifact@v4
