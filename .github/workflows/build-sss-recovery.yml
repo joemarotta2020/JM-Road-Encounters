@@ -26,13 +26,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
           python tools/apply_sss_recovery.py src/main.cpp
           if ($LASTEXITCODE -ne 0) { throw 'SSS recovery source patch failed.' }
+          python tools/apply_original_idle_native_api.py src/main.cpp
+          if ($LASTEXITCODE -ne 0) { throw 'SSS original-idle native API patch failed.' }
 
-      - name: Restore save-compatible controller source
+      - name: Restore save-compatible original-idle controller
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           python tools/restore_save_compatible_sss_controller.py
           if ($LASTEXITCODE -ne 0) { throw 'Save-compatible SSS controller restore failed.' }
+          python tools/apply_original_idle_controller.py
+          if ($LASTEXITCODE -ne 0) { throw 'Original-idle SSS controller patch failed.' }
 
       - name: Test recovery source invariants
         shell: pwsh
@@ -120,7 +124,7 @@ jobs:
           Pop-Location
           Remove-Item $flagsTemp -Recurse -Force
 
-      - name: Compile save-compatible SSS controller
+      - name: Compile SSS recovery Papyrus
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -130,7 +134,17 @@ jobs:
           Set-Content -Path $corePath -Value $coreText -Encoding utf8
           New-Item -ItemType Directory -Force -Path build\papyrus | Out-Null
           .github\Caprica\Caprica.exe --game skyrim --import ".github/Papyrus/SRC;.github/Papyrus/SRC_SKYUI;.github/Papyrus/SRC_PAPUTIL;papyrus;" --output "build/papyrus" --flags=".github/Papyrus/SRC/TESV_Papyrus_Flags.flg" "${{ github.workspace }}/papyrus" -R -q
-          if (-not (Test-Path 'build\papyrus\JM_SSS_WhoringController.pex')) { throw 'JM_SSS_WhoringController.pex was not produced.' }
+          $expected = @(
+            'JM_SSS_WhoringController.pex',
+            'JM_RE_Native.pex',
+            'SSS_SoliciteforSex.pex',
+            'SSS_SoldierWhore.pex',
+            'SSS_AmuletSex.pex',
+            'SSS_BanditApproach.pex'
+          )
+          foreach ($name in $expected) {
+            if (-not (Test-Path (Join-Path 'build\papyrus' $name))) { throw "$name was not produced." }
+          }
 
       - name: Verify binaries contain recovery behavior
         shell: pwsh
@@ -144,24 +158,32 @@ jobs:
           }
 
           $dllAscii = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($dll.FullName))
-          foreach ($required in @('JM_RoadEncounters.ini', 'SSSWhoringExclusions', 'SSS exclusion active:', 'SSS exclusion config loaded:')) {
-            if (-not $dllAscii.Contains($required)) { throw "DLL missing recovery string: $required" }
+          foreach ($required in @('JM_RoadEncounters.ini', 'SSSWhoringExclusions', 'SSS exclusion active:', 'SSS exclusion config loaded:', 'IsSSSWhoringExcluded')) {
+            if (-not $dllAscii.Contains($required)) { throw "DLL missing recovery marker: $required" }
           }
           foreach ($forbidden in @('accepted SSS dialogue by authoritative package fallback', 'SSS_Whoring startup reconciliation')) {
             if ($dllAscii.Contains($forbidden)) { throw "DLL still contains regressed behavior: $forbidden" }
           }
 
-          $pex = 'build\papyrus\JM_SSS_WhoringController.pex'
-          $pexAscii = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($pex))
-          foreach ($required in @('live SSS dialogue verified for actor=', 'AcquisitionDialogueObserved', 'JM_SOSReassertPending')) {
-            if (-not $pexAscii.Contains($required)) { throw "PEX missing save-compatible recovery marker: $required" }
+          $controllerPex = 'build\papyrus\JM_SSS_WhoringController.pex'
+          $controllerAscii = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($controllerPex))
+          foreach ($required in @('ORIGINAL IDLE CLAIM actor=', 'TryClaimOriginalIdle', 'AcquisitionDialogueObserved', 'JM_SOSReassertPending', 'live SSS dialogue verified for actor=')) {
+            if (-not $controllerAscii.Contains($required)) { throw "Controller PEX missing recovery marker: $required" }
           }
-          if ($pexAscii.Contains('waiting for original SSS acceptance fragment')) { throw 'PEX contains later broken wait-for-fragment behavior.' }
+          if ($controllerAscii.Contains('waiting for original SSS acceptance fragment')) { throw 'Controller PEX contains broken wait-for-fragment behavior.' }
+
+          foreach ($fragment in @('SSS_SoliciteforSex.pex','SSS_SoldierWhore.pex','SSS_AmuletSex.pex','SSS_BanditApproach.pex')) {
+            $bytes = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes((Join-Path 'build\papyrus' $fragment)))
+            if (-not $bytes.Contains('TryClaimOriginalIdle')) { throw "$fragment does not contain original-idle claim gate." }
+            if ($bytes.Contains('BeginEncounter')) { throw "$fragment still commits encounter at idle acquisition." }
+          }
 
           Get-FileHash $dll.FullName -Algorithm SHA256 | Format-List
-          Get-FileHash $pex -Algorithm SHA256 | Format-List
+          foreach ($name in @('JM_SSS_WhoringController.pex','JM_RE_Native.pex','SSS_SoliciteforSex.pex','SSS_SoldierWhore.pex','SSS_AmuletSex.pex','SSS_BanditApproach.pex')) {
+            Get-FileHash (Join-Path 'build\papyrus' $name) -Algorithm SHA256 | Format-List
+          }
 
-      - name: Commit canonical recovery source
+      - name: Commit canonical recovery sources
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -169,7 +191,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/main.cpp papyrus/JM_SSS_WhoringController.psc
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'Restore strict SSS ownership with save-compatible controller'
+            git commit -m 'Restore original SSS idle acquisition authority'
             git push origin HEAD:recovery/sss-prefeature-exclusion-only
           } else {
             Write-Host 'Canonical recovery sources already committed.'
@@ -187,25 +209,39 @@ jobs:
           $dll = Get-ChildItem -Path build -Recurse -File -Filter 'JM_RoadEncounters.dll' | Select-Object -First 1
           Copy-Item $dll.FullName artifact\SKSE\Plugins\JM_RoadEncounters.dll
           Copy-Item config\JM_RoadEncounters.ini artifact\SKSE\Plugins\JM_RoadEncounters.ini
-          Copy-Item build\papyrus\JM_SSS_WhoringController.pex artifact\Scripts\JM_SSS_WhoringController.pex
-          Copy-Item papyrus\JM_SSS_WhoringController.psc artifact\Source\Scripts\JM_SSS_WhoringController.psc
+
+          $papyrusNames = @(
+            'JM_SSS_WhoringController',
+            'JM_RE_Native',
+            'SSS_SoliciteforSex',
+            'SSS_SoldierWhore',
+            'SSS_AmuletSex',
+            'SSS_BanditApproach'
+          )
+          foreach ($base in $papyrusNames) {
+            Copy-Item (Join-Path 'build\papyrus' ($base + '.pex')) (Join-Path 'artifact\Scripts' ($base + '.pex'))
+            Copy-Item (Join-Path 'papyrus' ($base + '.psc')) (Join-Path 'artifact\Source\Scripts' ($base + '.psc'))
+          }
           Copy-Item src\main.cpp artifact\Source\JM-Road-Encounters\src\main.cpp
           Copy-Item src\SSSExclusionConfig.h artifact\Source\JM-Road-Encounters\src\SSSExclusionConfig.h
 
           $dllHash = (Get-FileHash $dll.FullName -Algorithm SHA256).Hash
-          $pexHash = (Get-FileHash build\papyrus\JM_SSS_WhoringController.pex -Algorithm SHA256).Hash
           "Recovery native baseline commit: edea94e124068e89cd7231d48d05a454e76bbe37" | Set-Content artifact\BUILD_INFO.txt
           "DLL SHA256: $dllHash" | Add-Content artifact\BUILD_INFO.txt
-          "Controller PEX SHA256: $pexHash" | Add-Content artifact\BUILD_INFO.txt
+          foreach ($base in $papyrusNames) {
+            $hash = (Get-FileHash (Join-Path 'build\papyrus' ($base + '.pex')) -Algorithm SHA256).Hash
+            "$base.pex SHA256: $hash" | Add-Content artifact\BUILD_INFO.txt
+          }
           "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
-          "Architecture: strict pre-regression SSS dialogue ownership plus in-memory-only configurable exclusions" | Add-Content artifact\BUILD_INFO.txt
-          "Controller: current serialized field layout retained; only broken wait-for-fragment commit behavior rolled back" | Add-Content artifact\BUILD_INFO.txt
-          "No FLST dependency; no package-fallback dialogue ownership; no native SSS startup reconciliation" | Add-Content artifact\BUILD_INFO.txt
+          "Architecture: original SSS_WhoringIdle INFOs are acquisition authority; native code only supplies permanent exclusion query/diagnostics" | Add-Content artifact\BUILD_INFO.txt
+          "Controller: current serialized field layout retained; no proactive native alias injection" | Add-Content artifact\BUILD_INFO.txt
+          "No ESP change in this build; retain the restored JM_SSS_Overhaul.esp already deployed" | Add-Content artifact\BUILD_INFO.txt
+          "No package-fallback dialogue ownership; no native SSS startup reconciliation" | Add-Content artifact\BUILD_INFO.txt
 
       - name: Upload recovery artifact
         uses: actions/upload-artifact@v4
         with:
-          name: JM-SSS-Recovery-SE-1.5.97
+          name: JM-SSS-Original-Idle-Recovery-SE-1.5.97
           path: artifact/
           if-no-files-found: error
           retention-days: 30
