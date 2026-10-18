@@ -1,5 +1,8 @@
 #include "PCH.h"
 #include "SSSEligibilityPolicy.h"
+#include "SSSExclusionConfig.h"
+
+#include <fstream>
 
 namespace JM::RoadEncounters
 {
@@ -43,6 +46,141 @@ namespace JM::RoadEncounters
         constexpr std::uint32_t kSSSForceGreetTemplate = 0x00D471B7;
 
         std::shared_ptr<spdlog::logger> g_sssLogger;
+
+        // JM_SSS_EXCLUSION_CONFIG_V1
+        constexpr std::uint32_t kSSSWhoringExcludedActorsFormID = 0x00000805;
+        RE::BGSListForm* g_sssWhoringExcludedActors = nullptr;
+
+        bool IsSSSWhoringExcluded(RE::Actor* a_actor)
+        {
+            auto* base = a_actor ? a_actor->GetActorBase() : nullptr;
+            return g_sssWhoringExcludedActors && base &&
+                   g_sssWhoringExcludedActors->HasForm(base);
+        }
+
+        void LoadSSSWhoringExclusions()
+        {
+            auto* dataHandler = RE::TESDataHandler::GetSingleton();
+            if (!dataHandler) {
+                if (g_sssLogger) {
+                    g_sssLogger->error("SSS exclusion load failed: TESDataHandler unavailable");
+                }
+                return;
+            }
+
+            g_sssWhoringExcludedActors = dataHandler->LookupForm<RE::BGSListForm>(
+                kSSSWhoringExcludedActorsFormID, "JM_SSS_Overhaul.esp");
+            if (!g_sssWhoringExcludedActors) {
+                if (g_sssLogger) {
+                    g_sssLogger->warn(
+                        "SSS exclusion FormList JM_SSS_WhoringExcludedActors not found; "
+                        "config exclusions disabled");
+                }
+                return;
+            }
+
+            std::ifstream input("Data/SKSE/Plugins/JM_RoadEncounters.ini");
+            if (!input) {
+                if (g_sssLogger) {
+                    g_sssLogger->warn(
+                        "SSS exclusion config not found: Data/SKSE/Plugins/JM_RoadEncounters.ini");
+                }
+                return;
+            }
+
+            bool inSection = false;
+            std::uint32_t added = 0;
+            std::uint32_t ignored = 0;
+            std::string line;
+            while (std::getline(input, line)) {
+                auto view = SSSExclusionConfig::TrimView(line);
+                if (!view.empty() && static_cast<unsigned char>(view.front()) == 0xEF) {
+                    if (view.size() >= 3 &&
+                        static_cast<unsigned char>(view[1]) == 0xBB &&
+                        static_cast<unsigned char>(view[2]) == 0xBF) {
+                        view.remove_prefix(3);
+                        view = SSSExclusionConfig::TrimView(view);
+                    }
+                }
+                if (view.empty() || view.front() == ';' || view.front() == '#') {
+                    continue;
+                }
+                if (view.front() == '[' && view.back() == ']') {
+                    inSection = (view == "[SSSWhoringExclusions]");
+                    continue;
+                }
+                if (!inSection) {
+                    continue;
+                }
+
+                const auto equals = view.find('=');
+                if (equals == std::string_view::npos) {
+                    ++ignored;
+                    continue;
+                }
+                const auto key = SSSExclusionConfig::TrimView(view.substr(0, equals));
+                if (!key.starts_with("Form")) {
+                    continue;
+                }
+                auto value = SSSExclusionConfig::TrimView(view.substr(equals + 1));
+                const auto comment = value.find_first_of(";#");
+                if (comment != std::string_view::npos) {
+                    value = SSSExclusionConfig::TrimView(value.substr(0, comment));
+                }
+
+                const auto parsed = SSSExclusionConfig::ParsePluginFormValue(value);
+                if (!parsed) {
+                    ++ignored;
+                    if (g_sssLogger) {
+                        g_sssLogger->warn("ignored malformed SSS exclusion entry: {}", value);
+                    }
+                    continue;
+                }
+
+                auto* resolved = dataHandler->LookupForm<RE::TESForm>(
+                    parsed->localFormID, parsed->plugin);
+                if (!resolved) {
+                    ++ignored;
+                    if (g_sssLogger) {
+                        g_sssLogger->warn(
+                            "ignored unresolved SSS exclusion {}|0x{:06X}",
+                            parsed->plugin, parsed->localFormID);
+                    }
+                    continue;
+                }
+
+                RE::TESForm* baseForm = resolved;
+                if (auto* reference = resolved->As<RE::TESObjectREFR>()) {
+                    baseForm = reference->GetBaseObject();
+                }
+                auto* npc = baseForm ? baseForm->As<RE::TESNPC>() : nullptr;
+                if (!npc) {
+                    ++ignored;
+                    if (g_sssLogger) {
+                        g_sssLogger->warn(
+                            "ignored non-NPC SSS exclusion {}|0x{:06X}",
+                            parsed->plugin, parsed->localFormID);
+                    }
+                    continue;
+                }
+
+                if (!g_sssWhoringExcludedActors->HasForm(npc)) {
+                    g_sssWhoringExcludedActors->AddForm(npc);
+                    ++added;
+                }
+                if (g_sssLogger) {
+                    g_sssLogger->info(
+                        "SSS exclusion active: npc={} base=0x{:08X} source={}|0x{:06X}",
+                        npc->GetName(), npc->GetFormID(),
+                        parsed->plugin, parsed->localFormID);
+                }
+            }
+
+            if (g_sssLogger) {
+                g_sssLogger->info(
+                    "SSS exclusion config loaded: added={} ignored={}", added, ignored);
+            }
+        }
 
         struct Candidate
         {
@@ -209,7 +347,8 @@ namespace JM::RoadEncounters
             auto* player = RE::PlayerCharacter::GetSingleton();
             if (!player || !a_actor || a_actor == player ||
                 a_actor->IsDead() || a_actor->IsDisabled() ||
-                !a_actor->Is3DLoaded() || !IsSSSHumanoidCandidate(a_actor) ||
+                !a_actor->Is3DLoaded() || IsSSSWhoringExcluded(a_actor) ||
+                !IsSSSHumanoidCandidate(a_actor) ||
                 !IsSSSBiologicalFemaleCandidate(a_actor)) {
                 return -1;
             }
@@ -261,6 +400,9 @@ namespace JM::RoadEncounters
                 a_actor->IsDead() || a_actor->IsDisabled() ||
                 !a_actor->Is3DLoaded()) {
                 return { -1, "none", "invalid" };
+            }
+            if (IsSSSWhoringExcluded(a_actor)) {
+                return { -1, "config", "excluded" };
             }
 
             // Hard species boundary: SSS_Whoring is for humanoid NPC races.
@@ -528,6 +670,7 @@ namespace JM::RoadEncounters
 
             std::int32_t tested = 0;
             std::int32_t rejectedInvalid = 0;
+            std::int32_t rejectedExcluded = 0;
             std::int32_t rejectedSpecies = 0;
             std::int32_t rejectedBiologicalSex = 0;
             std::int32_t rejectedChild = 0;
@@ -570,6 +713,8 @@ namespace JM::RoadEncounters
                 const std::string_view reason = classification.reason;
                 if (reason == "invalid") {
                     ++rejectedInvalid;
+                } else if (reason == "excluded") {
+                    ++rejectedExcluded;
                 } else if (reason == "non-humanoid-race") {
                     ++rejectedSpecies;
                 } else if (reason == "biological-male-or-unknown") {
@@ -612,11 +757,12 @@ namespace JM::RoadEncounters
             if (g_sssLogger && (scan % 10) == 0) {
                 g_sssLogger->info(
                     "acquisition scan #{} found no usable SSS actor "
-                    "(tested={}, invalid={}, species={}, biologicalSex={}, child={}, teammate={}, "
+                    "(tested={}, invalid={}, excluded={}, species={}, biologicalSex={}, child={}, teammate={}, "
                     "combat={}, hostile={}, cannotTalk={}, radius={:.0f})",
                     scan,
                     tested,
                     rejectedInvalid,
+                    rejectedExcluded,
                     rejectedSpecies,
                     rejectedBiologicalSex,
                     rejectedChild,
@@ -641,7 +787,8 @@ namespace JM::RoadEncounters
             RE::StaticFunctionTag*,
             RE::Actor* a_actor)
         {
-            if (!a_actor || !IsSSSHumanoidCandidate(a_actor) ||
+            if (!a_actor || IsSSSWhoringExcluded(a_actor) ||
+                !IsSSSHumanoidCandidate(a_actor) ||
                 !IsSSSBiologicalFemaleCandidate(a_actor)) {
                 return false;
             }
@@ -894,6 +1041,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 
     if (!messaging->RegisterListener([](SKSE::MessagingInterface::Message* a_message) {
             if (!a_message) {
+                return;
+            }
+
+            if (a_message->type == SKSE::MessagingInterface::kDataLoaded) {
+                JM::RoadEncounters::LoadSSSWhoringExclusions();
                 return;
             }
 
