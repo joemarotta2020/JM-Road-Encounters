@@ -28,6 +28,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion source patch failed.' }
           python tools/fix_sss_exclusion_resolver.py src/main.cpp
           if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion resolver patch failed.' }
+          python tools/fix_sss_dialogue_ownership.py src/main.cpp
+          if ($LASTEXITCODE -ne 0) { throw 'SSS dialogue ownership patch failed.' }
 
       - name: Verify SSS exclusion source invariants
         shell: pwsh
@@ -37,10 +39,12 @@ jobs:
           foreach ($required in @(
             'JM_SSS_EXCLUSION_CONFIG_V1',
             'JM_SSS_PLUGIN_LOCAL_RESOLVER_V1',
+            'JM_SSS_DIALOGUE_OWNERSHIP_V2',
             'ResolveSSSExclusionForm',
             'LoadSSSWhoringExclusions',
             'IsSSSWhoringExcluded',
             'kSSSWhoringExcludedActorsFormID = 0x00000805',
+            'sssApproachPackageActive',
             'SKSE::MessagingInterface::kDataLoaded',
             'SSS exclusion config loaded')) {
             if (-not $text.Contains($required)) { throw "Missing SSS exclusion invariant: $required" }
@@ -102,8 +106,14 @@ jobs:
           }
           $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
           $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
-          foreach ($required in @('JM_SSS_Overhaul.esp','JM_RoadEncounters.ini','SSSWhoringExclusions','SSS exclusion config loaded')) {
-            if (-not $ascii.Contains($required)) { throw "Built DLL does not contain expected exclusion implementation string: $required" }
+          foreach ($required in @(
+            'JM_SSS_Overhaul.esp',
+            'JM_RoadEncounters.ini',
+            'SSSWhoringExclusions',
+            'SSS exclusion config loaded',
+            'accepted SSS dialogue while JM RE force-greet quest is running',
+            'foreign JM RE force-greet')) {
+            if (-not $ascii.Contains($required)) { throw "Built DLL does not contain expected SSS implementation string: $required" }
           }
           Get-FileHash $dll.FullName -Algorithm SHA256 | Format-List
 
@@ -115,7 +125,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/main.cpp
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'Fix configurable SSS exclusion form resolution'
+            git commit -m 'Fix SSS dialogue ownership and exclusion runtime'
             git push origin HEAD:feature/sss-whoring-exclusions
           } else {
             Write-Host 'Canonical source already committed.'
@@ -137,6 +147,7 @@ jobs:
           "DLL SHA256: $hash" | Set-Content artifact\BUILD_INFO.txt
           "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
           "Feature: configurable SSS_Whoring exclusions; Wartimes Mother default" | Add-Content artifact\BUILD_INFO.txt
+          "Fix: legitimate SSS package ownership outranks stale/running JM RE force-greet quest state" | Add-Content artifact\BUILD_INFO.txt
 
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
