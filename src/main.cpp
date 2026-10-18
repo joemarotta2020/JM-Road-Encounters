@@ -58,6 +58,40 @@ namespace JM::RoadEncounters
                    g_sssWhoringExcludedActors->HasForm(base);
         }
 
+        // JM_SSS_PLUGIN_LOCAL_RESOLVER_V1
+        // CommonLibSSE-NG v3.7.0 LookupFormID() incorporates the light-plugin
+        // index field even for normal plugins on SE. Construct the runtime ID
+        // explicitly so INI plugin-local identities resolve exactly like
+        // Papyrus Game.GetFormFromFile(). Keep this helper private to the SSS
+        // exclusion loader so no established JM RE lookup behavior changes.
+        RE::TESForm* ResolveSSSExclusionForm(
+            RE::TESDataHandler* a_dataHandler,
+            std::uint32_t a_localFormID,
+            std::string_view a_plugin)
+        {
+            if (!a_dataHandler) {
+                return nullptr;
+            }
+
+            const auto* file = a_dataHandler->LookupModByName(a_plugin);
+            if (!file || file->compileIndex == 0xFF) {
+                return nullptr;
+            }
+
+            RE::FormID runtimeFormID = 0;
+            if (file->compileIndex == 0xFE) {
+                runtimeFormID = 0xFE000000u |
+                    (static_cast<RE::FormID>(file->smallFileCompileIndex) << 12) |
+                    (a_localFormID & 0x00000FFFu);
+            } else {
+                runtimeFormID =
+                    (static_cast<RE::FormID>(file->compileIndex) << 24) |
+                    (a_localFormID & 0x00FFFFFFu);
+            }
+
+            return RE::TESForm::LookupByID(runtimeFormID);
+        }
+
         void LoadSSSWhoringExclusions()
         {
             auto* dataHandler = RE::TESDataHandler::GetSingleton();
@@ -137,8 +171,8 @@ namespace JM::RoadEncounters
                     continue;
                 }
 
-                auto* resolved = dataHandler->LookupForm<RE::TESForm>(
-                    parsed->localFormID, parsed->plugin);
+                auto* resolved = ResolveSSSExclusionForm(
+                    dataHandler, parsed->localFormID, parsed->plugin);
                 if (!resolved) {
                     ++ignored;
                     if (g_sssLogger) {
