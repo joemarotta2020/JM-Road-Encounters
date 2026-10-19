@@ -681,7 +681,7 @@ namespace JM::RoadEncounters
             RE::StaticFunctionTag*,
             RE::Actor* a_actor)
         {
-            return ClassifySSSWhoringActorDetailed(a_actor).aliasIndex;
+            return ClassifySSSWhoringActorExactImpl(a_actor);  // JM_SSS_RECOVERY_V1
         }
 
         RE::Actor* FindSSSWhoringActor(
@@ -724,19 +724,17 @@ namespace JM::RoadEncounters
                 }
 
                 ++tested;
-                const auto classification =
-                    ClassifySSSWhoringActorDetailed(actor);
+                const auto exactAlias = ClassifySSSWhoringActorExactImpl(actor);
 
-                if (classification.aliasIndex >= 0) {
-                    // Prefer explicit force-greet archetypes (guards/bandits)
-                    // over generic clients, while preserving nearest-first
-                    // ordering within each tier.
-                    if ((classification.aliasIndex == 3 ||
-                         classification.aliasIndex == 5) &&
+                if (exactAlias >= 0) {
+                    const SSSClassificationResult classification{ exactAlias, "exact", "loaded-info" };
+                    // Preserve established preference only after Skyrim's loaded
+                    // SSS_WhoringIdle condition chain passes for this actor.
+                    if ((exactAlias == 3 || exactAlias == 5) &&
                         !fallbackSpecial) {
                         fallbackSpecial = actor;
                         fallbackSpecialClass = classification;
-                    } else if (classification.aliasIndex == 0 &&
+                    } else if ((exactAlias == 0 || exactAlias == 2) &&
                                !fallbackGeneral) {
                         fallbackGeneral = actor;
                         fallbackGeneralClass = classification;
@@ -744,26 +742,7 @@ namespace JM::RoadEncounters
                     continue;
                 }
 
-                const std::string_view reason = classification.reason;
-                if (reason == "invalid") {
-                    ++rejectedInvalid;
-                } else if (reason == "excluded") {
-                    ++rejectedExcluded;
-                } else if (reason == "non-humanoid-race") {
-                    ++rejectedSpecies;
-                } else if (reason == "biological-male-or-unknown") {
-                    ++rejectedBiologicalSex;
-                } else if (reason == "child") {
-                    ++rejectedChild;
-                } else if (reason == "teammate") {
-                    ++rejectedTeammate;
-                } else if (reason == "in-combat") {
-                    ++rejectedCombat;
-                } else if (reason == "hostile") {
-                    ++rejectedHostile;
-                } else if (reason == "cannot-talk") {
-                    ++rejectedCannotTalk;
-                }
+                ++rejectedInvalid;
             }
 
             RE::Actor* selected =
@@ -869,24 +848,14 @@ namespace JM::RoadEncounters
                 info->parentTopic != nullptr &&
                 info->parentTopic->ownerQuest == quest;
 
-            // JM_SSS_DIALOGUE_OWNERSHIP_V3
-            // The authoritative original SSS approach package is a valid
-            // ownership signal when Skyrim's MenuTopicManager does not expose
-            // an SSS-owned currentTopicInfo during the polling frame.  Exact
-            // reserved-speaker matching and the foreign-JM-RE veto still apply.
+            // JM_SSS_RECOVERY_V1: package state may disambiguate a stale/parallel
+            // JM RE quest, but it is never sufficient to commit SSS by itself.
+            // Commitment still requires the exact reserved speaker AND a live
+            // TopicInfo owned by SSS_Whoring.
             const bool active = Eligibility::ShouldAcceptSSSDialogueCommit(
                 jmReOwnsDialogue,
                 speakerMatchesReservedActor,
-                topicOwnedBySSS,
-                sssApproachPackageActive);
-
-            if (active && !topicOwnedBySSS && sssApproachPackageActive && g_sssLogger) {
-                g_sssLogger->info(
-                    "accepted SSS dialogue by authoritative package fallback: "
-                    "speaker={} form=0x{:08X}",
-                    a_actor->GetName(),
-                    a_actor->GetFormID());
-            }
+                topicOwnedBySSS);
 
             if (jmReOwnsDialogue && speakerMatchesReservedActor && g_sssLogger) {
                 g_sssLogger->info(
