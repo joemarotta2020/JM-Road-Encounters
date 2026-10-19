@@ -1,0 +1,182 @@
+name: Build SSS Whoring Recovery
+
+on:
+  push:
+    branches:
+      - fix/sss-whoring-recovery-20261018
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-se:
+    name: Skyrim SE 1.5.97 SSS recovery
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout recovery branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply controlled recovery patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/apply_sss_recovery_cpp.py .
+          if ($LASTEXITCODE -ne 0) { throw 'SSS recovery source patch failed.' }
+
+      - name: Verify recovery source invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cpp = Get-Content src/main.cpp -Raw
+          $policy = Get-Content src/SSSEligibilityPolicy.h -Raw
+          foreach ($required in @(
+            'JM_SSS_EXCLUSION_CONFIG_V1',
+            'JM_SSS_PLUGIN_LOCAL_RESOLVER_V1',
+            'JM_SSS_QUEST_STARTUP_V1',
+            'JM_SSS_RECOVERY_V1',
+            'ClassifySSSWhoringActorExactImpl(a_actor)',
+            'const auto exactAlias = ClassifySSSWhoringActorExactImpl(actor);',
+            '"exact", "loaded-info"',
+            'JM_SSS_DIALOGUE_OWNERSHIP_V2',
+            'SSS exclusion config loaded',
+            'SSS_Whoring startup reconciliation')) {
+            if (-not $cpp.Contains($required)) { throw "Missing SSS recovery invariant: $required" }
+          }
+          foreach ($forbidden in @(
+            'JM_SSS_DIALOGUE_OWNERSHIP_V3',
+            'accepted SSS dialogue by authoritative package fallback')) {
+            if ($cpp.Contains($forbidden)) { throw "Forbidden SSS recovery behavior remains: $forbidden" }
+          }
+          if ($policy.Contains('a_authoritativeSSSPackageActive')) {
+            throw 'Dialogue policy still permits package-only commitment.'
+          }
+          $ini = Get-Content config/JM_RoadEncounters.ini -Raw
+          if (-not $ini.Contains('Form1=pchsWartimes.esp|0x005A16')) {
+            throw 'Mother exclusion missing from INI.'
+          }
+
+      - name: Audit canonical JM RE source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/audit_jm_re.py .
+          if ($LASTEXITCODE -ne 0) { throw 'JM RE production invariant audit failed.' }
+
+      - name: Set up MSVC x64
+        uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
+        with:
+          arch: x64
+
+      - name: Test SSS exclusion parser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path build\tests | Out-Null
+          cl /nologo /std:c++20 /EHsc tests\SSSExclusionConfigTests.cpp /Fe:build\tests\SSSExclusionConfigTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion parser compile failed.' }
+          .\build\tests\SSSExclusionConfigTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS exclusion parser tests failed.' }
+
+      - name: Test strict SSS dialogue ownership policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cl /nologo /std:c++20 /EHsc tests\SSSDialogueOwnershipTests.cpp /Fe:build\tests\SSSDialogueOwnershipTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS dialogue ownership test compile failed.' }
+          .\build\tests\SSSDialogueOwnershipTests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSS dialogue ownership test failed.' }
+
+      - name: Prepare vcpkg
+        shell: pwsh
+        run: |
+          C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          C:\vcpkg\vcpkg.exe version
+
+      - name: Configure release
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+
+      - name: Build release DLL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --build build --config Release --target JM_RoadEncounters -- /m
+          if ($LASTEXITCODE -ne 0) { throw 'JM_RoadEncounters DLL build failed.' }
+
+      - name: Verify DLL exports and recovery implementation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = Get-ChildItem -Path build -Recurse -File -Filter 'JM_RoadEncounters.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'JM_RoadEncounters.dll was not produced.' }
+          $exports = (& dumpbin /nologo /exports $dll.FullName) -join "`n"
+          foreach ($required in @('SKSEPlugin_Load', 'SKSEPlugin_Query', 'SKSEPlugin_Version')) {
+            if ($exports -notmatch [regex]::Escape($required)) { throw "Missing required SKSE export: $required" }
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
+          $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+          foreach ($required in @(
+            'JM_SSS_Overhaul.esp',
+            'JM_RoadEncounters.ini',
+            'SSSWhoringExclusions',
+            'SSS exclusion config loaded',
+            'SSS_Whoring startup reconciliation',
+            'eligible actor=',
+            'loaded-info',
+            'verified live SSS dialogue speaker=')) {
+            if (-not $ascii.Contains($required)) { throw "Built DLL missing recovery implementation string: $required" }
+          }
+          if ($ascii.Contains('accepted SSS dialogue by authoritative package fallback')) {
+            throw 'Built DLL still contains forbidden package-only SSS dialogue fallback.'
+          }
+          Get-FileHash $dll.FullName -Algorithm SHA256 | Format-List
+
+      - name: Commit canonical recovered C++ source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main.cpp src/SSSEligibilityPolicy.h tests/SSSDialogueOwnershipTests.cpp
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Restore exact SSS acquisition and strict dialogue commit'
+            git push origin HEAD:fix/sss-whoring-recovery-20261018
+          } else {
+            Write-Host 'Canonical recovered C++ source already committed.'
+          }
+
+      - name: Stage deployment artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path artifact\SKSE\Plugins | Out-Null
+          New-Item -ItemType Directory -Force -Path artifact\Source\JM-Road-Encounters\src | Out-Null
+          $dll = Get-ChildItem -Path build -Recurse -File -Filter 'JM_RoadEncounters.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'JM_RoadEncounters.dll was not produced.' }
+          Copy-Item $dll.FullName artifact\SKSE\Plugins\JM_RoadEncounters.dll
+          Copy-Item config\JM_RoadEncounters.ini artifact\SKSE\Plugins\JM_RoadEncounters.ini
+          Copy-Item src\main.cpp artifact\Source\JM-Road-Encounters\src\main.cpp
+          Copy-Item src\SSSExclusionConfig.h artifact\Source\JM-Road-Encounters\src\SSSExclusionConfig.h
+          Copy-Item src\SSSEligibilityPolicy.h artifact\Source\JM-Road-Encounters\src\SSSEligibilityPolicy.h
+          $hash = (Get-FileHash $dll.FullName -Algorithm SHA256).Hash
+          "DLL SHA256: $hash" | Set-Content artifact\BUILD_INFO.txt
+          "Runtime guard: Skyrim SE 1.5.97 only" | Add-Content artifact\BUILD_INFO.txt
+          "Recovery: candidate selection uses loaded SSS_WhoringIdle INFO conditions" | Add-Content artifact\BUILD_INFO.txt
+          "Recovery: package state alone can never commit SSS dialogue" | Add-Content artifact\BUILD_INFO.txt
+          "Invariant: Wartimes Mother exclusion remains active" | Add-Content artifact\BUILD_INFO.txt
+          "Invariant: stopped nonterminal SSS_Whoring is started before native wake" | Add-Content artifact\BUILD_INFO.txt
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JM-SSS-Whoring-Recovery-SE-1.5.97
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
